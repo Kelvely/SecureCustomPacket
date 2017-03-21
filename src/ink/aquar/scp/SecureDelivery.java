@@ -9,6 +9,7 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Map.Entry;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -46,11 +47,14 @@ public class SecureDelivery {
 	private final static Crypto DEFAULT_ASYM_CRYPTO = new RSACrypto();
 	private final static Crypto DEFAULT_SYM_CRYPTO = new AESCrypto();
 	
+	private final static Random RANDOM = new Random();
+	
 	
 	private final byte[] publicKey;
 	private final byte[] privateKey;
 	
 	private byte[] sessionKey;
+	private int sessionId;
 	
 	private final Crypto asymCrypto;
 	private final Crypto symCrypto;
@@ -81,7 +85,7 @@ public class SecureDelivery {
 		this.symCrypto = symCrypto;
 	}
 	
-	public void send(byte[] data) {
+	public void send(int tag, byte[] data) {
 		if(connectionStage < 4) throw new NoConnectionException();
 		// TODO
 	}
@@ -162,6 +166,31 @@ public class SecureDelivery {
 	 * 		|<----------------------------------| Stage 4
 	 * 		|									|
 	 */
+	
+	/*
+	 * Form
+	 * | HEAD CRC | SESSION ID | OPERATION | DATA CRC | DATAGRAM |
+	 *      8B          4B          1B          8B      length-9B
+	 */
+	@SuppressWarnings("unused")
+	private final static class ExplicitOperations {
+		// TODO You should use these operations
+		public final static byte DISCONNECT = 0; //Disconnection can be both implicit and explicit.
+		public final static byte CONNECT = 1;
+		public final static byte PUBLIC_KEY_OFFER = 2;
+		public final static byte START_SESSION = 3;
+	}
+	
+	@SuppressWarnings("unused")
+	private final static class ImplicitOperations {
+		// TODO And also here
+		public final static byte DISCONNECT = 0; //However, disconnect(byte[])'s extra data is encrypted.
+		public final static byte CONFIRM_SESSION = 4;
+		public final static byte CONNECTION_ESTABLISH = 5;
+		public final static byte SEND_DATA = 6;
+		public final static byte CONFIRM_DATA = 7;
+		public final static byte BROKEN_DATA = 8;
+	}
 	
 	/**
 	 * You should notice that no one said the alive-keeper works on time :P

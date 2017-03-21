@@ -2,7 +2,7 @@ package ink.aquar.scp.util;
 
 public class IntegerMap<T> {
 	
-private final static int DEFAULT_TOP_DEPTH = 7;
+	private final static int DEFAULT_TOP_DEPTH = 7;
 	
 	private final int topDepth; // min for 0, byte for 1, short for 3, int for 7, long for 15, max for 15.
 	
