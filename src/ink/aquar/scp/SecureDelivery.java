@@ -13,6 +13,9 @@ import java.util.Random;
 import java.util.Map.Entry;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import ink.aquar.scp.util.TickingScheduler;
+
 import java.util.Set;
 
 /**
@@ -49,6 +52,11 @@ public class SecureDelivery {
 	
 	private final static Random RANDOM = new Random();
 	
+	private final static TickingScheduler SCHEDULER = new TickingScheduler();
+	static {
+		SCHEDULER.start();
+	}
+	
 	
 	private final byte[] publicKey;
 	private final byte[] privateKey;
@@ -64,6 +72,11 @@ public class SecureDelivery {
 	public final String basicReceptorChannelName;
 	
 	private byte connectionStage;
+	
+	private int keepAliveInterval = 5000;
+	private int deadTime = 20000;
+	private int requestTimeout = 5000;
+	private int requestReSends = 6;
 	
 	private final Map<String, SecureReceiver> receivers = new HashMap<>();
 	private final ReadWriteLock receiversRWL = new ReentrantReadWriteLock();
@@ -83,6 +96,42 @@ public class SecureDelivery {
 		this.privateKey = privateKey;
 		this.asymCrypto = asymCrypto;
 		this.symCrypto = symCrypto;
+	}
+	
+	public int getKeepAliveInterval() {
+		return keepAliveInterval;
+	}
+	
+	public void setKeepAliveInterval(int keepAliveInterval) {
+		if(keepAliveInterval < 1000) keepAliveInterval = 1000;
+		this.keepAliveInterval = keepAliveInterval;
+	}
+	
+	public int getDeadTime() {
+		return deadTime;
+	}
+	
+	public void setDeadTime(int deadTime) {
+		if(deadTime < 1000) deadTime = 1000;
+		this.deadTime = deadTime;
+	}
+	
+	public int getRequestTimeout() {
+		return requestTimeout;
+	}
+	
+	public void setRequestTimeout(int requestTimeout) {
+		if(requestTimeout < 1000) requestTimeout = 1000;
+		this.requestTimeout = requestTimeout;
+	}
+	
+	public int getRequestReSends() {
+		return requestReSends;
+	}
+	
+	public void setRequestReSends(int requestReSends) {
+		if(requestReSends < 0) requestReSends = 0;
+		this.requestReSends = requestReSends;
 	}
 	
 	public void send(int tag, byte[] data) {
@@ -170,7 +219,7 @@ public class SecureDelivery {
 	/*
 	 * Form
 	 * | HEAD CRC | SESSION ID | OPERATION | DATA CRC | DATAGRAM |
-	 *      8B          4B          1B          8B      length-9B
+	 *      8B          4B          1B          8B     length-21B
 	 */
 	@SuppressWarnings("unused")
 	private final static class ExplicitOperations {
