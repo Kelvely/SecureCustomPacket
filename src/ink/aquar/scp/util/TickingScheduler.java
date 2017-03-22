@@ -80,6 +80,7 @@ public class TickingScheduler {
 	}
 	
 	public void schedule(Runnable task, int delay) {
+		if(delay<0) delay = 0;
 		synchronized (agenda) {
 			int time = this.time + delay / tickInterval;
 			List<Runnable> list = agenda.get(time);
