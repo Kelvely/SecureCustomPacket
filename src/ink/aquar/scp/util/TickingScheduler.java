@@ -98,5 +98,41 @@ public class TickingScheduler {
 			e.printStackTrace();
 		}
 	}
+	
+	public final static class Wrapper {
+		
+		private final TickingScheduler scheduler;
+		
+		public Wrapper() {
+			scheduler = new TickingScheduler();
+		}
+		
+		public Wrapper(int tickInterval) {
+			scheduler = new TickingScheduler(tickInterval);
+		}
+		
+		
+		public void schedule(Runnable task) {
+			schedule(task, 0);
+		}
+		
+		public void schedule(Runnable task, int delay) {
+			synchronized (scheduler) {
+				if(!scheduler.isRunning()) {
+					scheduler.start();
+				}
+			}
+			scheduler.schedule(task, delay);
+		}
+		
+		public void stop(){
+			scheduler.stop();
+		}
+		
+		public boolean isRunning(){
+			return scheduler.isRunning();
+		}
+		
+	}
 
 }

@@ -45,11 +45,7 @@ public class SecureDelivery {
 	
 	private final static Random RANDOM = new Random();
 	
-	private final static TickingScheduler SCHEDULER = new TickingScheduler();
-	static {
-		SCHEDULER.start();
-	}
-	
+	private final static TickingScheduler.Wrapper SCHEDULER = new TickingScheduler.Wrapper();
 	
 	private final byte[] publicKey;
 	private final byte[] privateKey;
@@ -216,7 +212,6 @@ public class SecureDelivery {
 	 */
 	@SuppressWarnings("unused")
 	private final static class ExplicitOperations {
-		// TODO You should use these operations
 		public final static byte DISCONNECT = 0; //Disconnection can be both implicit and explicit.
 		public final static byte CONNECT = 1;
 		public final static byte PUBLIC_KEY_OFFER = 2;
@@ -225,181 +220,12 @@ public class SecureDelivery {
 	
 	@SuppressWarnings("unused")
 	private final static class ImplicitOperations {
-		// TODO And also here
 		public final static byte DISCONNECT = 0; //However, disconnect(byte[])'s extra data is encrypted.
 		public final static byte CONFIRM_SESSION = 4;
 		public final static byte CONNECTION_ESTABLISH = 5;
 		public final static byte SEND_DATA = 6;
 		public final static byte CONFIRM_DATA = 7;
 		public final static byte BROKEN_DATA = 8;
-	}
-	
-	/**
-	 * You should notice that no one said the alive-keeper works on time :P
-	 * Tiny delay is here. 
-	 * 
-	 * @author Aquarink
-	 *
-	 */
-	private final static class KeepAliveScheduler implements Runnable {
-		
-		private final static KeepAliveScheduler KEEP_ALIVE_SCHEDULER = new KeepAliveScheduler();
-		private static boolean started;
-		
-		private int time;
-		
-		private final Set<KeepAliveWrapper> agenda = new HashSet<>();
-		
-		private static void startIfNotStarted() {
-			if(!started) {
-				new Thread(KEEP_ALIVE_SCHEDULER).start();
-			}
-		}
-
-		@Override
-		public void run() {
-			for(;;) {
-				plus1s();
-				
-				synchronized (agenda) {
-					Iterator<KeepAliveWrapper> iterator = agenda.iterator();
-					while(iterator.hasNext()) {
-						KeepAliveWrapper wrapper = iterator.next();
-						if(wrapper.next == time) {
-							try {
-								wrapper.delivery.keepAlive();
-								wrapper.next += wrapper.delay;
-							} catch (NoConnectionException ex) {
-								agenda.remove(wrapper);
-							}
-						} else if (wrapper.next < time) {
-							agenda.remove(wrapper);
-						}
-					}
-				}
-				
-				time++;
-			}
-		}
-		
-		/**
-		 * Big news θ..θ!
-		 */
-		private static void plus1s(){
-			try {
-				Thread.sleep(1000);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-		}
-		
-		public void plan(SecureDelivery delivery, int delay) {
-			synchronized (agenda) {
-				agenda.add(new KeepAliveWrapper(delivery, delay, time));
-			}
-		}
-		
-		/**
-		 * @param delivery
-		 * @param delay By second
-		 */
-		public static void schedule(SecureDelivery delivery, int delay) {
-			startIfNotStarted();
-			KEEP_ALIVE_SCHEDULER.plan(delivery, delay);
-		}
-		
-		private final static class KeepAliveWrapper {
-			
-			public final SecureDelivery delivery;
-			
-			public final int delay;
-			
-			public int next;
-			
-			public KeepAliveWrapper(SecureDelivery delivery, int delay, int time) {
-				this.delivery = delivery;
-				this.delay = delay;
-				next = delay + time;
-			}
-			
-			@Override
-			public int hashCode() {
-				return delivery.hashCode();
-			}
-			
-			@Override
-			public boolean equals(Object obj) {
-				return delivery.equals(obj);
-			}
-			
-		}
-	
-	}
-	
-	private final static class ConnectionReaper implements Runnable {
-		
-		private final static ConnectionReaper CONNECTION_REAPER = new ConnectionReaper();
-		private static boolean started;
-		
-		private int time;
-		
-		private final Map<SecureDelivery, Integer> agenda = new HashMap<>();
-		
-		private static void startIfNotStarted() {
-			if(!started) {
-				new Thread(CONNECTION_REAPER).start();
-			}
-		}
-
-		@Override
-		public void run() {
-			for(;;) {
-				plus1s();
-				
-				synchronized (agenda) {
-					List<SecureDelivery> deliveriesDied = new LinkedList<>();
-					
-					for(Entry<SecureDelivery, Integer> entry : agenda.entrySet()) {
-						int timeToDie = entry.getValue();
-						if(timeToDie <= time) {
-							entry.getKey().disconnect(); // TODO Not really like this :P
-							deliveriesDied.add(entry.getKey());
-						}
-					}
-					
-					Iterator<SecureDelivery> iterator = deliveriesDied.iterator();
-					while (iterator.hasNext()) {
-						agenda.remove(iterator.next());
-					}
-				}
-				
-				time++;
-			}
-		}
-		
-		private static void plus1s(){
-			try {
-				Thread.sleep(1000);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-		}
-		
-		public void elongate(SecureDelivery delivery, int delay) {
-			synchronized (agenda) {
-				agenda.put(delivery, time + delay);
-			}
-		}
-		
-		/**
-		 * @param delivery
-		 * @param delay By second
-		 */
-		public static void keep(SecureDelivery delivery, int delay) {
-			startIfNotStarted();
-			CONNECTION_REAPER.elongate(delivery, delay);
-		}
-		
 	}
 
 }
