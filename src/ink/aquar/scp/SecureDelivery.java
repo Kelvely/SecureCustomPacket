@@ -141,7 +141,7 @@ public class SecureDelivery {
 		this.requestReSends = requestReSends;
 	}
 	
-	public void send(int tag, byte[] data) {
+	public void send(long tag, byte[] data) {
 		if(connectionStage < 4) throw new NoConnectionException();
 		// TODO
 	}
@@ -207,20 +207,16 @@ public class SecureDelivery {
 	
 	/*
 	 * Form
-	 * | HEAD CRC | SESSION ID | OPERATION | DATA CRC | DATAGRAM |
-	 *      8B          8B          1B          8B     length-25B
+	 * | HEAD CRC | SESSION ID | OPERATION | TAG | LETTER |
+	 *      8B          8B          1B        8B  length-25B
 	 */
 	@SuppressWarnings("unused")
-	private final static class ExplicitOperations {
-		public final static byte DISCONNECT = 0; //Disconnection can be both implicit and explicit.
+	private final static class Operations {
+		public final static byte DISCONNECT = 0;
 		public final static byte CONNECT = 1;
 		public final static byte PUBLIC_KEY_OFFER = 2;
 		public final static byte START_SESSION = 3;
-	}
-	
-	@SuppressWarnings("unused")
-	private final static class ImplicitOperations {
-		public final static byte DISCONNECT = 0; //However, disconnect(byte[])'s extra data is encrypted.
+		
 		public final static byte CONFIRM_SESSION = 4;
 		public final static byte CONNECTION_ESTABLISH = 5;
 		public final static byte SEND_DATA = 6;
@@ -228,137 +224,156 @@ public class SecureDelivery {
 		public final static byte BROKEN_DATA = 8;
 	}
 	
-	public final static class Packet {
-		public final static int HEAD_WITH_CRC_LENGTH = 25; //bytes
-		public final static int HEAD_LENGTH = 9; //Session ID and Operation
-		public final static int HEADCRC_START = 0;
-		public final static int SESSIONID_START = 8;
-		public final static int OPERATION_START = 16;
-		public final static int DATA_CRC_START = 17;
+	public final static class LetterWrapper {
 		
-		public final Head head;
-		public final byte[] datagram;
+		private final static int CRC_START = 0;
+		public final static int DATA_START = 8;
 		
-		public Packet(long sessionId, byte operation, byte[] datagram) {
-			this(new Head(sessionId, operation), datagram);
-		}
-		
-		public Packet(Head head, byte[] datagram) {
-			this.head = head;
-			this.datagram = datagram;
-		}
-		
-		public byte[] wrapInExplicit(){
-			byte[] bytes = new byte[HEAD_WITH_CRC_LENGTH + datagram.length];
-			ByteWrapper.toBytes(head.sessionId, bytes, SESSIONID_START);
-			ByteWrapper.toBytes(head.operation, bytes, OPERATION_START);
-			long headCRC = CRC64.checksum(bytes, SESSIONID_START, SESSIONID_START + HEAD_LENGTH);
-			ByteWrapper.toBytes(headCRC, bytes, HEADCRC_START);
+		public static byte[] wrap(byte[] data) {
+			byte[] bytes = new byte[data.length + DATA_START];
 			
-			long dataCRC = CRC64.checksum(datagram);
-			System.arraycopy(datagram, 0, bytes, HEAD_WITH_CRC_LENGTH, datagram.length);
-			ByteWrapper.toBytes(dataCRC, bytes, DATA_CRC_START);
+			long dataSum = CRC64.checksum(data);
+			ByteWrapper.toBytes(dataSum, bytes, CRC_START);
+			System.arraycopy(data, 0, bytes, DATA_START, data.length);
+			
 			return bytes;
 		}
 		
-		public byte[] wrapInImplicit(Crypto crypto, byte[] key) throws InvalidKeyException, BadPaddingException {
-			return crypto.encrypt(wrapInExplicit(), key);
+		public static byte[] wrapAndEncrypt(byte[] data, Crypto crypto, byte[] key) 
+				throws InvalidKeyException, BadPaddingException {
+			return crypto.encrypt(wrap(data), key);
 		}
 		
-		public static Packet resolveByImplicit(byte[] data, Crypto crypto, byte[] key) 
-				throws DataBrokenException, InvalidKeyException, BadPaddingException {
-			return resolveByExplicit(crypto.decrypt(data, key));
+		public static byte[] resolve(byte[] letter) throws DataBrokenException {
+			if(letter.length < DATA_START) {
+				throw new DataBrokenException();
+			}
+			
+			long headSum = ByteWrapper.fromBytes(letter, CRC_START, OutputType.LONG);
+			if(!CRC64.isDataComplete(headSum, letter, DATA_START, letter.length)) {
+				throw new DataBrokenException();
+			}
+			
+			byte[] bytes = new byte[letter.length - DATA_START];
+			System.arraycopy(letter, DATA_START, bytes, 0, bytes.length);
+			
+			return bytes;
 		}
 		
-		public static Packet resolveByExplicit(byte[] data) throws DataBrokenException {
-			if(data.length < HEAD_WITH_CRC_LENGTH) throw new DataBrokenException();
-			long headCRC = ByteWrapper.fromBytes(data, HEADCRC_START, OutputType.LONG);
-			if(!isDataComplete(headCRC, data, SESSIONID_START, HEAD_LENGTH)) {
+		public static byte[] decryptAndResolve(byte[] letter, Crypto crypto, byte[] key) 
+				throws InvalidKeyException, BadPaddingException, DataBrokenException {
+			return resolve(crypto.decrypt(letter, key));
+		}
+		
+		private LetterWrapper() {}
+	}
+	
+	public final static class Packet {
+		
+		public final static int HEAD_CRC_START = 0;
+		public final static int SESSION_ID_START = 8;
+		public final static int OPERATION_START = 16;
+		public final static int TAG_START = 17;
+		public final static int LETTER_START = 25;
+		
+		public final static int HEAD_START = 8;
+		public final static int HEAD_LENGTH = 17;
+		
+		public final Head head;
+		public final byte[] letter;
+		
+		public Packet(Head head, byte[] letter) {
+			this.head = head;
+			this.letter = letter;
+		}
+		
+		public Packet(long sessionId, byte operation, long tag, byte[] letter) {
+			this(new Head(sessionId, operation, tag), letter);
+		}
+		
+		public byte[] wrap() {
+			byte[] bytes = new byte[letter.length + LETTER_START];
+			
+			ByteWrapper.toBytes(head.sessionId, bytes, SESSION_ID_START);
+			ByteWrapper.toBytes(head.operation, bytes, OPERATION_START);
+			ByteWrapper.toBytes(head.tag, bytes, TAG_START);
+			
+			long headSum = CRC64.checksum(bytes, HEAD_START, LETTER_START);
+			ByteWrapper.toBytes(headSum, bytes, HEAD_CRC_START);
+			
+			System.arraycopy(letter, 0, bytes, LETTER_START, letter.length);
+			return bytes;
+		}
+		
+		public static Packet resolve(byte[] bytes) throws DataBrokenException {
+			if(bytes.length < LETTER_START) {
+				throw new DataBrokenException();
+			}
+			
+			long headSum = ByteWrapper.fromBytes(bytes, HEAD_CRC_START, OutputType.LONG);
+			if(!CRC64.isDataComplete(headSum, bytes, HEAD_START, LETTER_START)) {
 				throw new DataBrokenException();
 			}
 			
 			Head head = new Head(
-					ByteWrapper.fromBytes(data, SESSIONID_START, OutputType.LONG), 
-					ByteWrapper.fromBytes(data, OPERATION_START, OutputType.BYTE)
+					ByteWrapper.fromBytes(bytes, SESSION_ID_START, OutputType.LONG), 
+					ByteWrapper.fromBytes(bytes, OPERATION_START, OutputType.BYTE),
+					ByteWrapper.fromBytes(bytes, TAG_START, OutputType.LONG)
 					);
 			
-			long dataCRC = ByteWrapper.fromBytes(data, DATA_CRC_START, OutputType.LONG);
-			if(!isDataComplete(dataCRC, data, HEAD_WITH_CRC_LENGTH, data.length - HEAD_WITH_CRC_LENGTH)) {
-				throw new DataBrokenException(head);
-			}
+			byte[] letter = new byte[bytes.length - LETTER_START];
+			System.arraycopy(bytes, LETTER_START, letter, 0, letter.length);
 			
-			byte[] datagram = new byte[data.length - HEAD_WITH_CRC_LENGTH];
-			System.arraycopy(data, HEAD_WITH_CRC_LENGTH, datagram, 0, datagram.length);
-			
-			return new Packet(head, datagram);
-		}
-		
-		private static boolean isDataComplete(long crc, byte[] data, int start, int length) {
-			long realCRC = CRC64.checksum(data, start, start + length);
-			return crc == realCRC;
-		}
-		
-		public final static class DataBrokenException extends Exception {
-			
-			private static final long serialVersionUID = 1186487923670618064L;
-			
-			public final Head head;
-			
-			public DataBrokenException() {
-				this(null);
-			}
-			
-			public DataBrokenException(Head head) {
-				this.head = head;
-			}
-			
+			return new Packet(head, letter);
 		}
 		
 		public final static class Head {
 			public final long sessionId;
 			public final byte operation;
+			public final long tag;
 			
-			public Head(long sessionId, byte operation) {
+			public Head(long sessionId, byte operation, long tag) {
 				this.sessionId = sessionId;
 				this.operation = operation;
+				this.tag = tag;
 			}
 		}
 		
 	}
 	
-	/*public static void main(String[] args) {
+	public final static class DataBrokenException extends Exception {
+		
+		private static final long serialVersionUID = 5943658912911088754L;
+		
+	}
+	
+	/*public static void main(String[] args) throws InvalidKeyException, BadPaddingException {
+		
+		byte[] key = AESCrypto.genKeyPair().getEncoded();
 		
 		Packet packet = new Packet(
-				1486712, (byte) 2, 
-				"We have implicit trust in him.".getBytes()
+				1486712, (byte) 2, 87497233, 
+				LetterWrapper.wrapAndEncrypt(
+						"We have implicit trust in him.".getBytes(), 
+						DEFAULT_SYM_CRYPTO, key)
 				);
 		
-		byte[] bytes;
-		try {
-			bytes = packet.wrapInImplicit(DEFAULT_ASYM_CRYPTO, DEFAULT_PUBLIC_KEY);
-		} catch (InvalidKeyException e1) {
-			System.out.println("Invalid Public Key!");
-			return;
-		} catch (BadPaddingException e1) {
-			System.out.println("Invalid Padding on Encryption!");
-			return;
-		}
+		byte[] bytes = packet.wrap();
+		
+		//bytes[10] = 22;
 		
 		try {
-			Packet received = Packet.resolveByImplicit(bytes, DEFAULT_ASYM_CRYPTO, DEFAULT_PRIVATE_KEY);
-			System.out.println(new String(received.datagram));
+			Packet received = Packet.resolve(bytes);
+			System.out.println(
+					new String(
+							LetterWrapper.decryptAndResolve(received.letter, DEFAULT_SYM_CRYPTO, key)
+							)
+					);
+			System.out.println("Session ID: " + received.head.sessionId);
+			System.out.println("Operation: " + received.head.operation);
+			System.out.println("Tag: " + received.head.tag);
 		} catch (DataBrokenException e) {
-			if(e.head != null) {
-				System.out.println("Data broken!");
-				System.out.println("Session ID: " + e.head.sessionId);
-				System.out.println("Operation: " + e.head.operation);
-			} else {
-				System.out.println("Head broken!");
-			}
-		} catch (InvalidKeyException e) {
-			System.out.println("Invalid Private Key!");
-		} catch (BadPaddingException e) {
-			System.out.println("Invalid Padding on Decryption!");
+			System.out.println("Head broken!");
 		}
 		
 	}*/ // Test Code for Packet

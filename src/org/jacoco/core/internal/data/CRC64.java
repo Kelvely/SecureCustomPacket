@@ -67,6 +67,11 @@ public final class CRC64 {
         }
         return sum;
     }
+    
+    public static boolean isDataComplete(long sum, byte[] data, int start, int end) {
+		long realSum = CRC64.checksum(data, start, end);
+		return sum == realSum;
+	}
 
     private CRC64() {
     }

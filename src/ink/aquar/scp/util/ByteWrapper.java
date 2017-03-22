@@ -298,5 +298,7 @@ public class ByteWrapper {
 		}
 		return stringBuilder.toString();
 	}
+	
+	private ByteWrapper() {}
 
 }
