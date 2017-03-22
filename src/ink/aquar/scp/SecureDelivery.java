@@ -10,9 +10,13 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import javax.crypto.BadPaddingException;
 
+import org.jacoco.core.internal.data.CRC64;
+
 import ink.aquar.scp.crypto.AESCrypto;
 import ink.aquar.scp.crypto.Crypto;
 import ink.aquar.scp.crypto.RSACrypto;
+import ink.aquar.scp.util.ByteWrapper;
+import ink.aquar.scp.util.ByteWrapper.OutputType;
 import ink.aquar.scp.util.TickingScheduler;
 
 /**
@@ -225,18 +229,40 @@ public class SecureDelivery {
 	}
 	
 	public final static class Packet {
-		public final long headCRC;
-		public final long sessionId;
-		public final byte operation;
-		public final long dataCRC;
+		public final static int HEAD_WITH_CRC_LENGTH = 25; //bytes
+		public final static int HEAD_LENGTH = 9; //Session ID and Operation
+		public final static int HEADCRC_START = 0;
+		public final static int SESSIONID_START = 8;
+		public final static int OPERATION_START = 16;
+		public final static int DATA_CRC_START = 17;
+		
+		public final Head head;
 		public final byte[] datagram;
 		
-		private Packet(long headCRC, long sessionId, byte operation, long dataCRC, byte[] datagram) {
-			this.headCRC = headCRC;
-			this.sessionId = sessionId;
-			this.operation = operation;
-			this.dataCRC = dataCRC;
+		public Packet(long sessionId, byte operation, byte[] datagram) {
+			this(new Head(sessionId, operation), datagram);
+		}
+		
+		public Packet(Head head, byte[] datagram) {
+			this.head = head;
 			this.datagram = datagram;
+		}
+		
+		public byte[] wrapInExplicit(){
+			byte[] bytes = new byte[HEAD_WITH_CRC_LENGTH + datagram.length];
+			ByteWrapper.toBytes(head.sessionId, bytes, SESSIONID_START);
+			ByteWrapper.toBytes(head.operation, bytes, OPERATION_START);
+			long headCRC = CRC64.checksum(bytes, SESSIONID_START, SESSIONID_START + HEAD_LENGTH);
+			ByteWrapper.toBytes(headCRC, bytes, HEADCRC_START);
+			
+			long dataCRC = CRC64.checksum(datagram);
+			System.arraycopy(datagram, 0, bytes, HEAD_WITH_CRC_LENGTH, datagram.length);
+			ByteWrapper.toBytes(dataCRC, bytes, DATA_CRC_START);
+			return bytes;
+		}
+		
+		public byte[] wrapInImplicit(Crypto crypto, byte[] key) throws InvalidKeyException, BadPaddingException {
+			return crypto.encrypt(wrapInExplicit(), key);
 		}
 		
 		public static Packet resolveByImplicit(byte[] data, Crypto crypto, byte[] key) 
@@ -245,17 +271,96 @@ public class SecureDelivery {
 		}
 		
 		public static Packet resolveByExplicit(byte[] data) throws DataBrokenException {
+			if(data.length < HEAD_WITH_CRC_LENGTH) throw new DataBrokenException();
+			long headCRC = ByteWrapper.fromBytes(data, HEADCRC_START, OutputType.LONG);
+			if(!isDataComplete(headCRC, data, SESSIONID_START, HEAD_LENGTH)) {
+				throw new DataBrokenException();
+			}
 			
-			// TODO Not auto-generated stub :P
-			return null;
+			Head head = new Head(
+					ByteWrapper.fromBytes(data, SESSIONID_START, OutputType.LONG), 
+					ByteWrapper.fromBytes(data, OPERATION_START, OutputType.BYTE)
+					);
+			
+			long dataCRC = ByteWrapper.fromBytes(data, DATA_CRC_START, OutputType.LONG);
+			if(!isDataComplete(dataCRC, data, HEAD_WITH_CRC_LENGTH, data.length - HEAD_WITH_CRC_LENGTH)) {
+				throw new DataBrokenException(head);
+			}
+			
+			byte[] datagram = new byte[data.length - HEAD_WITH_CRC_LENGTH];
+			System.arraycopy(data, HEAD_WITH_CRC_LENGTH, datagram, 0, datagram.length);
+			
+			return new Packet(head, datagram);
+		}
+		
+		private static boolean isDataComplete(long crc, byte[] data, int start, int length) {
+			long realCRC = CRC64.checksum(data, start, start + length);
+			return crc == realCRC;
 		}
 		
 		public final static class DataBrokenException extends Exception {
 			
 			private static final long serialVersionUID = 1186487923670618064L;
 			
+			public final Head head;
+			
+			public DataBrokenException() {
+				this(null);
+			}
+			
+			public DataBrokenException(Head head) {
+				this.head = head;
+			}
+			
+		}
+		
+		public final static class Head {
+			public final long sessionId;
+			public final byte operation;
+			
+			public Head(long sessionId, byte operation) {
+				this.sessionId = sessionId;
+				this.operation = operation;
+			}
 		}
 		
 	}
+	
+	/*public static void main(String[] args) {
+		
+		Packet packet = new Packet(
+				1486712, (byte) 2, 
+				"We have implicit trust in him.".getBytes()
+				);
+		
+		byte[] bytes;
+		try {
+			bytes = packet.wrapInImplicit(DEFAULT_ASYM_CRYPTO, DEFAULT_PUBLIC_KEY);
+		} catch (InvalidKeyException e1) {
+			System.out.println("Invalid Public Key!");
+			return;
+		} catch (BadPaddingException e1) {
+			System.out.println("Invalid Padding on Encryption!");
+			return;
+		}
+		
+		try {
+			Packet received = Packet.resolveByImplicit(bytes, DEFAULT_ASYM_CRYPTO, DEFAULT_PRIVATE_KEY);
+			System.out.println(new String(received.datagram));
+		} catch (DataBrokenException e) {
+			if(e.head != null) {
+				System.out.println("Data broken!");
+				System.out.println("Session ID: " + e.head.sessionId);
+				System.out.println("Operation: " + e.head.operation);
+			} else {
+				System.out.println("Head broken!");
+			}
+		} catch (InvalidKeyException e) {
+			System.out.println("Invalid Private Key!");
+		} catch (BadPaddingException e) {
+			System.out.println("Invalid Padding on Decryption!");
+		}
+		
+	}*/ // Test Code for Packet
 
 }

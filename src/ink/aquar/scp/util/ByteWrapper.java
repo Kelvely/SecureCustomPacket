@@ -53,6 +53,22 @@ public class ByteWrapper {
 		}
 	}
 	
+	public static void toBytes(Object object, byte[] bytes, int start) {
+		if(start >= bytes.length) return;
+		byte[] data = toBytes(object);
+		int len = data.length;
+		if(start + len > bytes.length) {
+			len -= start + len - bytes.length;
+		}
+		if(start < 0) {
+			len -= 0 - start;
+			start = 0;
+		}
+		if(len > 0) {
+			System.arraycopy(data, 0, bytes, start, len);
+		}
+	}
+	
 	public static <T> T fromBytes(byte[] bytes, int start, OutputType<T> outputType) {
 		return outputType.fromBytes(bytes, start);
 	}
