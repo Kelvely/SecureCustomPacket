@@ -1,23 +1,19 @@
 package ink.aquar.scp;
 
+import java.security.InvalidKeyException;
 import java.security.KeyPair;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.Map.Entry;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import javax.crypto.BadPaddingException;
 
 import ink.aquar.scp.crypto.AESCrypto;
 import ink.aquar.scp.crypto.Crypto;
 import ink.aquar.scp.crypto.RSACrypto;
 import ink.aquar.scp.util.TickingScheduler;
-
-import java.util.Set;
 
 /**
  * 
@@ -47,11 +43,12 @@ public class SecureDelivery {
 	
 	private final static TickingScheduler.Wrapper SCHEDULER = new TickingScheduler.Wrapper();
 	
+	// For asymCrypto
 	private final byte[] publicKey;
 	private final byte[] privateKey;
 	
-	private byte[] sessionKey;
-	private int sessionId;
+	private byte[] sessionKey; // For symCrypto.
+	private long sessionId;
 	
 	private final Crypto asymCrypto;
 	private final Crypto symCrypto;
@@ -60,6 +57,23 @@ public class SecureDelivery {
 	
 	public final String basicReceptorChannelName;
 	
+	/*
+	 * 	Requester							Acceptor
+	 * 		|									|
+	 * 		|		   connect request			|
+	 * 		|---------------------------------->| Stage 1
+	 * 		|									|
+	 * 		|		 public key offering		|
+	 * 		|<----------------------------------| Stage 2
+	 * 		|									|
+	 * 		|		generate session key		|
+	 * 		|	  and encrypt by public key		|
+	 * 		|---------------------------------->| Stage 3
+	 * 		|									|
+	 * 		|		connection established		|
+	 * 		|<----------------------------------| Stage 4
+	 * 		|									|
+	 */
 	private byte connectionStage;
 	
 	private int keepAliveInterval = 5000;
@@ -187,28 +201,10 @@ public class SecureDelivery {
 		
 	}
 	
-	/** 
-	 * 	Requester							Acceptor
-	 * 		|									|
-	 * 		|		   connect request			|
-	 * 		|---------------------------------->| Stage 1
-	 * 		|									|
-	 * 		|		 public key offering		|
-	 * 		|<----------------------------------| Stage 2
-	 * 		|									|
-	 * 		|		generate session key		|
-	 * 		|	  and encrypt by public key		|
-	 * 		|---------------------------------->| Stage 3
-	 * 		|									|
-	 * 		|		connection established		|
-	 * 		|<----------------------------------| Stage 4
-	 * 		|									|
-	 */
-	
 	/*
 	 * Form
 	 * | HEAD CRC | SESSION ID | OPERATION | DATA CRC | DATAGRAM |
-	 *      8B          4B          1B          8B     length-21B
+	 *      8B          8B          1B          8B     length-25B
 	 */
 	@SuppressWarnings("unused")
 	private final static class ExplicitOperations {
@@ -226,6 +222,40 @@ public class SecureDelivery {
 		public final static byte SEND_DATA = 6;
 		public final static byte CONFIRM_DATA = 7;
 		public final static byte BROKEN_DATA = 8;
+	}
+	
+	public final static class Packet {
+		public final long headCRC;
+		public final long sessionId;
+		public final byte operation;
+		public final long dataCRC;
+		public final byte[] datagram;
+		
+		private Packet(long headCRC, long sessionId, byte operation, long dataCRC, byte[] datagram) {
+			this.headCRC = headCRC;
+			this.sessionId = sessionId;
+			this.operation = operation;
+			this.dataCRC = dataCRC;
+			this.datagram = datagram;
+		}
+		
+		public static Packet resolveByImplicit(byte[] data, Crypto crypto, byte[] key) 
+				throws DataBrokenException, InvalidKeyException, BadPaddingException {
+			return resolveByExplicit(crypto.decrypt(data, key));
+		}
+		
+		public static Packet resolveByExplicit(byte[] data) throws DataBrokenException {
+			
+			// TODO Not auto-generated stub :P
+			return null;
+		}
+		
+		public final static class DataBrokenException extends Exception {
+			
+			private static final long serialVersionUID = 1186487923670618064L;
+			
+		}
+		
 	}
 
 }
