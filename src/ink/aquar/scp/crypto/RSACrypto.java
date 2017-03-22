@@ -2,6 +2,8 @@ package ink.aquar.scp.crypto;
 
 import java.security.InvalidKeyException;
 import java.security.KeyFactory;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
@@ -25,6 +27,18 @@ public class RSACrypto implements Crypto {
 	private final static byte[][] EMPTY_2D_BYTE_ARRAY = new byte[0][];
 	
 	private final static int PUBLIC_KEY_LIMIT_DASH = 11;
+	
+	private final static KeyPairGenerator KEY_PAIR_GENERATOR;
+	static {
+		KeyPairGenerator keyPairGenerator = null;
+		try {
+			keyPairGenerator = KeyPairGenerator.getInstance(KEY_ALGORITHM);
+		} catch (NoSuchAlgorithmException ex) {
+			ex.printStackTrace();
+		}
+		keyPairGenerator.initialize(2048);
+		KEY_PAIR_GENERATOR = keyPairGenerator;
+	}
 
 	@Override
 	public byte[] encrypt(byte[] data, byte[] key) throws BadPaddingException, InvalidKeyException { //Public key
@@ -132,6 +146,10 @@ public class RSACrypto implements Crypto {
 			}
 		}
 		return marshalling.toArray(EMPTY_2D_BYTE_ARRAY);
+	}
+	
+	public static KeyPair genKeyPair(){
+		return KEY_PAIR_GENERATOR.generateKeyPair();
 	}
 
 }

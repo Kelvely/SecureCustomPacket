@@ -13,9 +13,6 @@ public interface Crypto {
 	
 	/**
 	 * When it failed to decrypt, null is returned.
-	 * @param data
-	 * @param key
-	 * @return
 	 */
 	public byte[] decrypt(byte[] data, byte[] key) throws BadPaddingException, InvalidKeyException;
 

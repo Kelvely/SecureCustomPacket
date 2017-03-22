@@ -1,8 +1,6 @@
 package ink.aquar.scp;
 
 import java.security.KeyPair;
-import java.security.KeyPairGenerator;
-import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -30,7 +28,6 @@ import java.util.Set;
  * @author Aquarink Studio
  *
  */
-@SuppressWarnings("deprecation")
 public class SecureDelivery {
 	
 	private final static byte[] EMPTY_BYTE_ARRAY = {};
@@ -38,14 +35,7 @@ public class SecureDelivery {
 	private final static byte[] DEFAULT_PUBLIC_KEY;
 	private final static byte[] DEFAULT_PRIVATE_KEY;
 	static {
-		KeyPairGenerator keyPairGenerator = null;
-		try {
-			keyPairGenerator = KeyPairGenerator.getInstance("RSA");
-		} catch (NoSuchAlgorithmException ex) {
-			ex.printStackTrace();
-		}
-		keyPairGenerator.initialize(2048);
-		KeyPair keyPair = keyPairGenerator.generateKeyPair();
+		KeyPair keyPair = RSACrypto.genKeyPair();
 		DEFAULT_PRIVATE_KEY = keyPair.getPrivate().getEncoded();
 		DEFAULT_PUBLIC_KEY = keyPair.getPublic().getEncoded();
 	}
@@ -78,8 +68,8 @@ public class SecureDelivery {
 	
 	private int keepAliveInterval = 5000;
 	private int deadTime = 20000;
-	private int requestTimeout = 5000;
-	private int requestReSends = 6;
+	private int requestTimeout = 10000;
+	private int requestReSends = 3;
 	
 	private final Map<String, SecureReceiver> receivers = new HashMap<>();
 	private final ReadWriteLock receiversRWL = new ReentrantReadWriteLock();
