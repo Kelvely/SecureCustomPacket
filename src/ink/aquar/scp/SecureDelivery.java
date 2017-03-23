@@ -289,114 +289,123 @@ public class SecureDelivery {
 	
 	
 	public void registerReceiver(String channelName, SecureReceiver receiver) {
-		receivers.put(channelName, receiver);
+		synchronized (receivers) {
+			receivers.put(channelName, receiver);
+		}
 	}
 	
 	public void unregisterReceiver(String channelName) {
-		receivers.remove(channelName);
-	}
-	
-	
-	public boolean isConnected() {
-		return connectionStage == Stages.CONNECTED;
-	}
-	
-	public int getConnectionStage() {
-		return connectionStage;
+		synchronized (receivers) {
+			receivers.remove(channelName);
+		}
 	}
 	
 	
 	private void broadcastReceive(int tag, byte[] data) {
-		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
-			byte[] clonedData = cloneBytes(data);
-			try {
-				entry.getValue().receive(tag, clonedData);
-			} catch (RuntimeException ex) {
-				System.err.println(
-						"Unhandled exception occured on receiving method \"receive(int, byte[])\" of receiver \""+ 
-								entry.getKey() +"\"");
-				ex.printStackTrace();
+		synchronized (receivers) {
+			for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+				byte[] clonedData = cloneBytes(data);
+				try {
+					entry.getValue().receive(tag, clonedData);
+				} catch (RuntimeException ex) {
+					System.err.println(
+							"Unhandled exception occured on receiving method \"receive(int, byte[])\" of receiver \""+ 
+									entry.getKey() +"\"");
+					ex.printStackTrace();
+				}
 			}
 		}
 	}
 	
 	private void broadcastPostConfirm(int tag) {
-		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
-			try {
-				entry.getValue().postConfirm(tag);
-			} catch (RuntimeException ex) {
-				System.err.println(
-						"Unhandled exception occured on receiving method \"postConfirm(int)\" of receiver \""+ 
-								entry.getKey() +"\"");
-				ex.printStackTrace();
+		synchronized (receivers) {
+			for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+				try {
+					entry.getValue().postConfirm(tag);
+				} catch (RuntimeException ex) {
+					System.err.println(
+							"Unhandled exception occured on receiving method \"postConfirm(int)\" of receiver \""+ 
+									entry.getKey() +"\"");
+					ex.printStackTrace();
+				}
 			}
 		}
 	}
 	
 	private void broadcastPostBroken(int tag) {
-		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
-			try {
-				entry.getValue().postBroken(tag);
-			} catch (RuntimeException ex) {
-				System.err.println(
-						"Unhandled exception occured on receiving method \"postBroken(int)\" of receiver \""+ 
-								entry.getKey() +"\"");
-				ex.printStackTrace();
+		synchronized (receivers) {
+			for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+				try {
+					entry.getValue().postBroken(tag);
+				} catch (RuntimeException ex) {
+					System.err.println(
+							"Unhandled exception occured on receiving method \"postBroken(int)\" of receiver \""+ 
+									entry.getKey() +"\"");
+					ex.printStackTrace();
+				}
 			}
 		}
 	}
 	
 	private void broadcastOnConnect(byte[] datagram) {
-		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
-			byte[] clonedDatagram = cloneBytes(datagram);
-			try {
-				entry.getValue().onConnect(clonedDatagram);
-			} catch (RuntimeException ex) {
-				System.err.println(
-						"Unhandled exception occured on receiving method \"onConnect(byte[])\" of receiver \""+ 
-								entry.getKey() +"\"");
-				ex.printStackTrace();
+		synchronized (receivers) {
+			for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+				byte[] clonedDatagram = cloneBytes(datagram);
+				try {
+					entry.getValue().onConnect(clonedDatagram);
+				} catch (RuntimeException ex) {
+					System.err.println(
+							"Unhandled exception occured on receiving method \"onConnect(byte[])\" of receiver \""+ 
+									entry.getKey() +"\"");
+					ex.printStackTrace();
+				}
 			}
 		}
 	}
 	
 	private void broadcastOnPublicKeyRespond(byte[] publicKey) {
-		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
-			byte[] clonedPublicKey = cloneBytes(publicKey);
-			try {
-				entry.getValue().onPublicKeyRespond(clonedPublicKey);
-			} catch (RuntimeException ex) {
-				System.err.println(
-						"Unhandled exception occured on receiving method \"onPublicKeyRespond(byte[])\" of receiver \""+ 
-								entry.getKey() +"\"");
-				ex.printStackTrace();
+		synchronized (receivers) {
+			for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+				byte[] clonedPublicKey = cloneBytes(publicKey);
+				try {
+					entry.getValue().onPublicKeyRespond(clonedPublicKey);
+				} catch (RuntimeException ex) {
+					System.err.println(
+							"Unhandled exception occured on receiving method \"onPublicKeyRespond(byte[])\" of receiver \""+ 
+									entry.getKey() +"\"");
+					ex.printStackTrace();
+				}
 			}
 		}
 	}
 	
 	private void broadcastOnConnectionEstablish() {
-		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
-			try {
-				entry.getValue().onConnectionEstablish();
-			} catch (RuntimeException ex) {
-				System.err.println(
-						"Unhandled exception occured on receiving method \"onConnectionEstablish()\" of receiver \""+ 
-								entry.getKey() +"\"");
-				ex.printStackTrace();
+		synchronized (receivers) {
+			for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+				try {
+					entry.getValue().onConnectionEstablish();
+				} catch (RuntimeException ex) {
+					System.err.println(
+							"Unhandled exception occured on receiving method \"onConnectionEstablish()\" of receiver \""+ 
+									entry.getKey() +"\"");
+					ex.printStackTrace();
+				}
 			}
 		}
 	}
 	
 	private void broadcastOnDisconnect(byte[] datagram) {
-		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
-			byte[] clonedDatagram = cloneBytes(datagram);
-			try {
-				entry.getValue().onDisconnect(clonedDatagram);
-			} catch (RuntimeException ex) {
-				System.err.println(
-						"Unhandled exception occured on receiving method \"onDisconnect(byte[])\" of receiver \""+ 
-								entry.getKey() +"\"");
-				ex.printStackTrace();
+		synchronized (receivers) {
+			for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+				byte[] clonedDatagram = cloneBytes(datagram);
+				try {
+					entry.getValue().onDisconnect(clonedDatagram);
+				} catch (RuntimeException ex) {
+					System.err.println(
+							"Unhandled exception occured on receiving method \"onDisconnect(byte[])\" of receiver \""+ 
+									entry.getKey() +"\"");
+					ex.printStackTrace();
+				}
 			}
 		}
 	}
