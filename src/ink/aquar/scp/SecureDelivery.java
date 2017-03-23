@@ -158,6 +158,22 @@ public class SecureDelivery {
 		connect(message.getBytes());
 	}
 	
+	public void respondConnect(boolean confirmation) {
+		// TODO
+	}
+	
+	public void connectStandBy(){
+		// TODO
+	}
+	
+	public void respondPublicKey(boolean confirmation) {
+		// TODO
+	}
+	
+	public void publicKeyStandBy(){
+		// TODO
+	}
+	
 	public void disconnect() {
 		disconnect(EMPTY_BYTE_ARRAY);
 	}
@@ -214,14 +230,16 @@ public class SecureDelivery {
 	private final static class Operations {
 		public final static byte DISCONNECT = 0;
 		public final static byte CONNECT = 1;
-		public final static byte PUBLIC_KEY_OFFER = 2;
-		public final static byte START_SESSION = 3;
+		public final static byte CONNECT_STANDBY = 2;
+		public final static byte PUBLIC_KEY_OFFER = 3;
+		public final static byte PUBLIC_KEY_STANDBY = 4;
+		public final static byte START_SESSION = 5;
 		
-		public final static byte CONFIRM_SESSION = 4;
-		public final static byte CONNECTION_ESTABLISH = 5;
-		public final static byte SEND_DATA = 6;
-		public final static byte CONFIRM_DATA = 7;
-		public final static byte BROKEN_DATA = 8;
+		public final static byte CONFIRM_SESSION = 6;
+		public final static byte CONNECTION_ESTABLISH = 7;
+		public final static byte SEND_DATA = 8;
+		public final static byte CONFIRM_DATA = 9;
+		public final static byte BROKEN_DATA = 10;
 	}
 	
 	public final static class LetterWrapper {
@@ -344,6 +362,93 @@ public class SecureDelivery {
 	public final static class DataBrokenException extends Exception {
 		
 		private static final long serialVersionUID = 5943658912911088754L;
+		
+	}
+	
+	public final static class TimeoutProfile {
+		
+		public final SingleProfile<Integer> connectRequestTimeout = 
+				new SingleProfile<Integer>(new TimeoutConstrain(10000), 10000);
+		public final SingleProfile<Integer> connectRequestReSends = 
+				new SingleProfile<Integer>(new ReSendsConstrain(10), 10);
+		
+		public final SingleProfile<Integer> publicKeyOfferWaitTimeout = 
+				new SingleProfile<Integer>(new TimeoutConstrain(600000), 600000);
+		
+		public final SingleProfile<Integer> publicKeyOfferTimeout = 
+				new SingleProfile<Integer>(new TimeoutConstrain(10000), 10000);
+		public final SingleProfile<Integer> publicKeyOfferReSends = 
+				new SingleProfile<Integer>(new ReSendsConstrain(10), 10);
+		
+		public final SingleProfile<Integer> startSessionWaitTimeout = 
+				new SingleProfile<Integer>(new TimeoutConstrain(600000), 600000);
+		
+		public final SingleProfile<Integer> startSessionTimeout = 
+				new SingleProfile<Integer>(new TimeoutConstrain(10000), 10000);
+		public final SingleProfile<Integer> startSessionReSends = 
+				new SingleProfile<Integer>(new ReSendsConstrain(15), 15);
+		
+		public final SingleProfile<Integer> connectionEstablishTimeout = 
+				new SingleProfile<Integer>(new TimeoutConstrain(10000), 10000);
+		public final SingleProfile<Integer> connectionEstablishReSends = 
+				new SingleProfile<Integer>(new ReSendsConstrain(5), 5);
+		
+		private final static class TimeoutConstrain implements Constrain<Integer> {
+			
+			public final int defaultTimeout;
+			public final static int MIN_TIMEOUT = 1000;
+			
+			public TimeoutConstrain(int defaultTimeout) {
+				this.defaultTimeout = defaultTimeout;
+			}
+
+			@Override
+			public Integer apply(Integer value) {
+				if(value == null) value = defaultTimeout;
+				if(value < MIN_TIMEOUT) value = MIN_TIMEOUT;
+				return value;
+			}
+			
+		}
+		
+		private final static class ReSendsConstrain implements Constrain<Integer> {
+			
+			public final int defaultReSends;
+			
+			public ReSendsConstrain(int defaultReSends) {
+				this.defaultReSends = defaultReSends;
+			}
+
+			@Override
+			public Integer apply(Integer value) {
+				if(value == null) value = defaultReSends;
+				if(value < 0) value = -1; // NOT RECOMMENDED: RESEND FOREVER 
+				return value;
+			}
+			
+		}
+		
+		public final static class SingleProfile<T> {
+			private T value;
+			private final Constrain<T> constrain;
+			
+			public SingleProfile(Constrain<T> constrain, T value) {
+				this.constrain = constrain;
+				set(value);
+			}
+			
+			public void set(T value) {
+				this.value = constrain.apply(value);
+			}
+			
+			public T get() {
+				return value;
+			}
+		}
+		
+		private static interface Constrain<T> {
+			public T apply(T value);
+		}
 		
 	}
 	
