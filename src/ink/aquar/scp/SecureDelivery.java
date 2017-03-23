@@ -11,8 +11,11 @@ import javax.crypto.BadPaddingException;
 import org.jacoco.core.internal.data.CRC64;
 
 import ink.aquar.scp.crypto.AESCrypto;
+import ink.aquar.scp.crypto.AsymmetricCrypto;
 import ink.aquar.scp.crypto.Crypto;
 import ink.aquar.scp.crypto.RSACrypto;
+import ink.aquar.scp.crypto.SymmetricCrypto;
+import ink.aquar.scp.crypto.AsymmetricCrypto.ByteKeyPair;
 import ink.aquar.scp.util.ByteWrapper;
 import ink.aquar.scp.util.ByteWrapper.OutputType;
 import ink.aquar.scp.util.QueueScheduler;
@@ -36,16 +39,16 @@ public class SecureDelivery {
 	
 	private final static byte[] EMPTY_BYTE_ARRAY = {};
 	
+	private final static AsymmetricCrypto DEFAULT_ASYM_CRYPTO = new RSACrypto();
+	private final static SymmetricCrypto DEFAULT_SYM_CRYPTO = new AESCrypto();
+	
 	private final static byte[] DEFAULT_PUBLIC_KEY;
 	private final static byte[] DEFAULT_PRIVATE_KEY;
 	static {
-		KeyPair keyPair = RSACrypto.genKeyPair();
-		DEFAULT_PRIVATE_KEY = keyPair.getPrivate().getEncoded();
-		DEFAULT_PUBLIC_KEY = keyPair.getPublic().getEncoded();
+		ByteKeyPair keyPair = new RSACrypto().generateKeyPair();
+		DEFAULT_PRIVATE_KEY = keyPair.privateKey;
+		DEFAULT_PUBLIC_KEY = keyPair.publicKey;
 	}
-	
-	private final static Crypto DEFAULT_ASYM_CRYPTO = new RSACrypto();
-	private final static Crypto DEFAULT_SYM_CRYPTO = new AESCrypto();
 	
 	private final static Random RANDOM = new Random();
 	

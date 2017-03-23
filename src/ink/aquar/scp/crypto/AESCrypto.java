@@ -10,7 +10,7 @@ import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
-public class AESCrypto implements Crypto {
+public class AESCrypto implements SymmetricCrypto {
 	
 	private final static String KEY_ALGORITHM = "AES";
 	private final static String CIPHER_ALGORITHM = "AES/ECB/PKCS5Padding";
@@ -59,6 +59,11 @@ public class AESCrypto implements Crypto {
 	
 	public static SecretKey genKeyPair(){
 		return KEY_GENERATOR.generateKey();
+	}
+
+	@Override
+	public byte[] generateKey() {
+		return KEY_GENERATOR.generateKey().getEncoded();
 	}
 
 }

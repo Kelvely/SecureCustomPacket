@@ -19,7 +19,7 @@ import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 
-public class RSACrypto implements Crypto {
+public class RSACrypto implements AsymmetricCrypto {
 	
 	private final static String KEY_ALGORITHM = "RSA";
 	private final static String CIPHER_ALGORITHM = "RSA/ECB/PKCS1Padding";
@@ -147,9 +147,11 @@ public class RSACrypto implements Crypto {
 		}
 		return marshalling.toArray(EMPTY_2D_BYTE_ARRAY);
 	}
-	
-	public static KeyPair genKeyPair(){
-		return KEY_PAIR_GENERATOR.generateKeyPair();
+
+	@Override
+	public ByteKeyPair generateKeyPair() {
+		KeyPair keyPair = KEY_PAIR_GENERATOR.generateKeyPair();
+		return new ByteKeyPair(keyPair.getPublic().getEncoded(), keyPair.getPrivate().getEncoded());
 	}
 
 }
