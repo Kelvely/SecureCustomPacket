@@ -1,7 +1,6 @@
 package ink.aquar.scp;
 
 import java.security.InvalidKeyException;
-import java.security.KeyPair;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -36,14 +35,15 @@ import ink.aquar.scp.util.TickingScheduler;
  *
  */
 public class SecureDelivery {
+	// Fields that labeled 'Complete' means here should have no more development related to this field.
 	
 	private final static byte[] EMPTY_BYTE_ARRAY = {};
 	
-	private final static AsymmetricCrypto DEFAULT_ASYM_CRYPTO = new RSACrypto();
-	private final static SymmetricCrypto DEFAULT_SYM_CRYPTO = new AESCrypto();
+	private final static AsymmetricCrypto DEFAULT_ASYM_CRYPTO = new RSACrypto(); // Complete.
+	private final static SymmetricCrypto DEFAULT_SYM_CRYPTO = new AESCrypto(); // Complete.
 	
-	private final static byte[] DEFAULT_PUBLIC_KEY;
-	private final static byte[] DEFAULT_PRIVATE_KEY;
+	private final static byte[] DEFAULT_PUBLIC_KEY; // Complete.
+	private final static byte[] DEFAULT_PRIVATE_KEY; // Complete.
 	static {
 		ByteKeyPair keyPair = new RSACrypto().generateKeyPair();
 		DEFAULT_PRIVATE_KEY = keyPair.privateKey;
@@ -57,7 +57,7 @@ public class SecureDelivery {
 	private final static byte[] BAD_PACKET = "BAD_PACKET".getBytes();
 	private final static byte[] TIMEOUT = "TIMEOUT".getBytes();
 	
-	private final static Scheduler DEFAULT_SCHEDULER = new QueueScheduler();
+	private final static Scheduler DEFAULT_SCHEDULER = new QueueScheduler(); // Complete.
 	
 	// For asymCrypto
 	private final byte[] publicKey;
@@ -66,12 +66,12 @@ public class SecureDelivery {
 	private byte[] sessionKey; // For symCrypto.
 	private long sessionId;
 	
-	private final Crypto asymCrypto;
-	private final Crypto symCrypto;
+	private final AsymmetricCrypto asymCrypto;
+	private final SymmetricCrypto symCrypto;
 	
-	private final BasicMessenger basicMessenger;
+	private final BasicMessenger basicMessenger; // Complete.
 	
-	public final String basicReceptorChannelName;
+	public final String basicReceptorChannelName; // Complete.
 	
 	/*
 	 * 	Requester							Acceptor
@@ -100,11 +100,13 @@ public class SecureDelivery {
 	 */
 	private int connectionStage;
 	
-	public final TimeoutProfile timeoutProfile = new TimeoutProfile();
+	private TimeoutTask nextTimeout;
 	
-	private final Map<String, SecureReceiver> receivers = new HashMap<>();
+	public final TimeoutProfile timeoutProfile = new TimeoutProfile(); // Complete.
 	
-	private int preRequestReSends;
+	private final Map<String, SecureReceiver> receivers = new HashMap<>(); // Complete.
+	
+	private int preRequestReSends; // Complete.
 	
 	/*
 	 * You can implement a BukkitManagedScheduler :P while BukkitScheduler is already used.
@@ -130,7 +132,7 @@ public class SecureDelivery {
 	public SecureDelivery(
 			String channelName, BasicMessenger basicMessenger, 
 			byte[] publicKey, byte[] privateKey, 
-			Crypto asymCrypto, Crypto symCrypto) {
+			AsymmetricCrypto asymCrypto, SymmetricCrypto symCrypto) {
 		this(
 				channelName, basicMessenger, 
 				publicKey, privateKey, asymCrypto, 
@@ -141,7 +143,7 @@ public class SecureDelivery {
 	public SecureDelivery(
 			String channelName, BasicMessenger basicMessenger, 
 			byte[] publicKey, byte[] privateKey, 
-			Crypto asymCrypto, Crypto symCrypto, Scheduler scheduler) {
+			AsymmetricCrypto asymCrypto, SymmetricCrypto symCrypto, Scheduler scheduler) {
 		basicReceptorChannelName = channelName;
 		this.basicMessenger = basicMessenger;
 		basicMessenger.registerReceptor(channelName, new LowLevelReceptor());
@@ -797,36 +799,20 @@ public class SecureDelivery {
 		
 	}
 	
-	
-	/*public static void main(String[] args) throws InvalidKeyException, BadPaddingException {
+	private static abstract class TimeoutTask implements Runnable {
 		
-		byte[] key = AESCrypto.genKeyPair().getEncoded();
+		private boolean isCancelled;
 		
-		Packet packet = new Packet(
-				1486712, (byte) 2, 87497233, 
-				LetterWrapper.wrapAndEncrypt(
-						"We have implicit trust in him.".getBytes(), 
-						DEFAULT_SYM_CRYPTO, key)
-				);
+		public final int timeoutLeft;
 		
-		byte[] bytes = packet.wrap();
-		
-		//bytes[10] = 22;
-		
-		try {
-			Packet received = Packet.resolve(bytes);
-			System.out.println(
-					new String(
-							LetterWrapper.decryptAndResolve(received.letter, DEFAULT_SYM_CRYPTO, key)
-							)
-					);
-			System.out.println("Session ID: " + received.head.sessionId);
-			System.out.println("Operation: " + received.head.operation);
-			System.out.println("Tag: " + received.head.tag);
-		} catch (DataBrokenException e) {
-			System.out.println("Head broken!");
+		public TimeoutTask(int timeoutLeft) {
+			this.timeoutLeft = timeoutLeft;
 		}
 		
-	}*/ // Test Code for Packet
+		public void cancel() {
+			isCancelled = true;
+		}
+		
+	}
 
 }
