@@ -6,12 +6,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Random;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-
 import javax.crypto.BadPaddingException;
 
 import org.jacoco.core.internal.data.CRC64;
@@ -21,6 +15,9 @@ import ink.aquar.scp.crypto.Crypto;
 import ink.aquar.scp.crypto.RSACrypto;
 import ink.aquar.scp.util.ByteWrapper;
 import ink.aquar.scp.util.ByteWrapper.OutputType;
+import ink.aquar.scp.util.QueueScheduler;
+import ink.aquar.scp.util.Scheduler;
+import ink.aquar.scp.util.SchedulerWrapper;
 import ink.aquar.scp.util.TickingScheduler;
 
 /**
@@ -28,7 +25,10 @@ import ink.aquar.scp.util.TickingScheduler;
  * <h1>If you want to deny some requester's connection, please deny it on BasicReceptor implementation.<br>
  * <br>
  * This Delivery is one-to-one connection, thus server need multiple deliveries.<br>
- * 
+ * <br>
+ * THIS IS NOT THREAD SAFE UNLESS YOU PUT SYNC SCHEDULER FOR DELIVERY!<br>
+ * QueueScheduler, which is default, is recommended for scheduler delivery.
+ * <br>
  * @author Aquarink Studio
  *
  */
@@ -49,7 +49,12 @@ public class SecureDelivery {
 	
 	private final static Random RANDOM = new Random();
 	
-	private final static TickingScheduler.Wrapper SCHEDULER = new TickingScheduler.Wrapper();
+	private final static TickingScheduler.Wrapper TICK_SCHEDULER = new TickingScheduler.Wrapper(new TickingScheduler());
+	
+	private final static byte[] BAD_PACKET = "BAD_PACKET".getBytes();
+	private final static byte[] TIMEOUT = "TIMEOUT".getBytes();
+	
+	private final static Scheduler DEFAULT_SCHEDULER = new QueueScheduler();
 	
 	// For asymCrypto
 	private final byte[] publicKey;
@@ -95,18 +100,45 @@ public class SecureDelivery {
 	public final TimeoutProfile timeoutProfile = new TimeoutProfile();
 	
 	private final Map<String, SecureReceiver> receivers = new HashMap<>();
-	private final ReadWriteLock receiversRWL = new ReentrantReadWriteLock();
 	
-	private AtomicInteger preRequestReSends;
+	private int preRequestReSends;
+	
+	/*
+	 * You can implement a BukkitManagedScheduler :P while BukkitScheduler is already used.
+	 */
+	private final SchedulerWrapper scheduler; 
 	
 	public SecureDelivery(String channelName, BasicMessenger basicMessenger) {
-		this(channelName, basicMessenger, DEFAULT_PUBLIC_KEY, DEFAULT_PRIVATE_KEY, DEFAULT_ASYM_CRYPTO, DEFAULT_SYM_CRYPTO);
+		this(
+				channelName, basicMessenger, 
+				DEFAULT_PUBLIC_KEY, DEFAULT_PRIVATE_KEY, 
+				DEFAULT_ASYM_CRYPTO, DEFAULT_SYM_CRYPTO
+				);
+	}
+	
+	public SecureDelivery(String channelName, BasicMessenger basicMessenger, Scheduler scheduler) {
+		this(
+				channelName, basicMessenger, 
+				DEFAULT_PUBLIC_KEY, DEFAULT_PRIVATE_KEY, 
+				DEFAULT_ASYM_CRYPTO, DEFAULT_SYM_CRYPTO, 
+				scheduler);
 	}
 	
 	public SecureDelivery(
 			String channelName, BasicMessenger basicMessenger, 
 			byte[] publicKey, byte[] privateKey, 
 			Crypto asymCrypto, Crypto symCrypto) {
+		this(
+				channelName, basicMessenger, 
+				publicKey, privateKey, asymCrypto, 
+				symCrypto, DEFAULT_SCHEDULER
+				);
+	}
+	
+	public SecureDelivery(
+			String channelName, BasicMessenger basicMessenger, 
+			byte[] publicKey, byte[] privateKey, 
+			Crypto asymCrypto, Crypto symCrypto, Scheduler scheduler) {
 		basicReceptorChannelName = channelName;
 		this.basicMessenger = basicMessenger;
 		basicMessenger.registerReceptor(channelName, new LowLevelReceptor());
@@ -114,73 +146,154 @@ public class SecureDelivery {
 		this.privateKey = privateKey;
 		this.asymCrypto = asymCrypto;
 		this.symCrypto = symCrypto;
+		this.scheduler = new SchedulerWrapper(scheduler);
 	}
+	
+	
+	
 	
 	public void send(long tag, byte[] data) {
-		if(connectionStage < Stages.CONNECTED) throw new NoConnectionException();
-		// TODO
+		scheduler.schedule(new Runnable() {
+			
+			@Override
+			public void run() {
+				checkConnection();
+				// TODO
+			}
+			
+		});
 	}
 	
+	
+	//Simplification
 	public void connect() {
 		connect(EMPTY_BYTE_ARRAY);
 	}
 	
 	public void connect(byte[] datagram) {
-		// TODO
+		scheduler.schedule(new Runnable() {
+			
+			@Override
+			public void run() {
+				checkStage(Stages.NOT_CONNECTED);
+				// TODO
+			}
+			
+		});
 	}
 	
+	//Simplification
 	public void connect(String message) {
 		connect(message.getBytes());
 	}
 	
+	
 	public void respondConnect(boolean confirmation) {
-		// TODO
+		scheduler.schedule(new Runnable() {
+			
+			@Override
+			public void run() {
+				checkStage(Stages.CONNECT_REQUEST_SENT);
+				// TODO
+			}
+			
+		});
 	}
+	
 	
 	public void connectStandBy(){
-		// TODO
+		scheduler.schedule(new Runnable() {
+			
+			@Override
+			public void run() {
+				checkStage(Stages.CONNECT_REQUEST_SENT);
+				// TODO
+			}
+			
+		});
 	}
+	
 	
 	public void respondPublicKey(boolean confirmation) {
-		// TODO
+		scheduler.schedule(new Runnable() {
+			
+			@Override
+			public void run() {
+				checkStage(Stages.PUBLIC_KEY_OFFERED);
+				// TODO
+			}
+			
+		});
 	}
+	
 	
 	public void publicKeyStandBy(){
-		// TODO
+		scheduler.schedule(new Runnable() {
+			
+			@Override
+			public void run() {
+				checkStage(Stages.PUBLIC_KEY_OFFERED);
+				// TODO
+			}
+			
+		});
 	}
 	
+	
+	//Simplification
 	public void disconnect() {
 		disconnect(EMPTY_BYTE_ARRAY);
 	}
 	
 	public void disconnect(byte[] datagram) {
-		if(connectionStage < Stages.CONNECTED) throw new NoConnectionException();
-		// TODO
+		scheduler.schedule(new Runnable() {
+			
+			@Override
+			public void run() {
+				checkConnection();
+				// TODO
+			}
+			
+		});
 	}
 	
+	//Simplification
 	public void disconnect(String message) {
 		disconnect(message.getBytes());
 	}
+	
 	
 	/**
 	 * Manually send keep alive packet.
 	 */
 	public void keepAlive() {
+		scheduler.schedule(new Runnable() {
+			
+			@Override
+			public void run() {
+				checkConnection();
+				// TODO
+			}
+			
+		});
+	}
+	
+	
+	private void checkStage(int stage) {
+		if(connectionStage != stage) throw new InconsistentStageException();
+	}
+	
+	private void checkConnection() {
 		if(connectionStage < Stages.CONNECTED) throw new NoConnectionException();
-		// TODO
 	}
 	
 	
 	public void registerReceiver(String channelName, SecureReceiver receiver) {
-		receiversRWL.writeLock().lock();
 		receivers.put(channelName, receiver);
-		receiversRWL.writeLock().unlock();
 	}
 	
 	public void unregisterReceiver(String channelName) {
-		receiversRWL.writeLock().lock();
 		receivers.remove(channelName);
-		receiversRWL.writeLock().unlock();
 	}
 	
 	
@@ -194,7 +307,6 @@ public class SecureDelivery {
 	
 	
 	private void broadcastReceive(int tag, byte[] data) {
-		receiversRWL.readLock().lock();
 		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
 			byte[] clonedData = cloneBytes(data);
 			try {
@@ -206,11 +318,9 @@ public class SecureDelivery {
 				ex.printStackTrace();
 			}
 		}
-		receiversRWL.readLock().unlock();
 	}
 	
 	private void broadcastPostConfirm(int tag) {
-		receiversRWL.readLock().lock();
 		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
 			try {
 				entry.getValue().postConfirm(tag);
@@ -221,11 +331,9 @@ public class SecureDelivery {
 				ex.printStackTrace();
 			}
 		}
-		receiversRWL.readLock().unlock();
 	}
 	
 	private void broadcastPostBroken(int tag) {
-		receiversRWL.readLock().lock();
 		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
 			try {
 				entry.getValue().postBroken(tag);
@@ -236,11 +344,9 @@ public class SecureDelivery {
 				ex.printStackTrace();
 			}
 		}
-		receiversRWL.readLock().unlock();
 	}
 	
 	private void broadcastOnConnect(byte[] datagram) {
-		receiversRWL.readLock().lock();
 		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
 			byte[] clonedDatagram = cloneBytes(datagram);
 			try {
@@ -252,11 +358,9 @@ public class SecureDelivery {
 				ex.printStackTrace();
 			}
 		}
-		receiversRWL.readLock().unlock();
 	}
 	
 	private void broadcastOnPublicKeyRespond(byte[] publicKey) {
-		receiversRWL.readLock().lock();
 		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
 			byte[] clonedPublicKey = cloneBytes(publicKey);
 			try {
@@ -268,11 +372,9 @@ public class SecureDelivery {
 				ex.printStackTrace();
 			}
 		}
-		receiversRWL.readLock().unlock();
 	}
 	
 	private void broadcastOnConnectionEstablish() {
-		receiversRWL.readLock().lock();
 		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
 			try {
 				entry.getValue().onConnectionEstablish();
@@ -283,11 +385,9 @@ public class SecureDelivery {
 				ex.printStackTrace();
 			}
 		}
-		receiversRWL.readLock().unlock();
 	}
 	
 	private void broadcastOnDisconnect(byte[] datagram) {
-		receiversRWL.readLock().lock();
 		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
 			byte[] clonedDatagram = cloneBytes(datagram);
 			try {
@@ -299,7 +399,6 @@ public class SecureDelivery {
 				ex.printStackTrace();
 			}
 		}
-		receiversRWL.readLock().unlock();
 	}
 	
 	private static byte[] cloneBytes(byte[] data) {
@@ -311,6 +410,8 @@ public class SecureDelivery {
 	
 	private void resolve(Packet packet) {
 		// TODO
+		// TODO
+		// TODO!!!!
 	}
 	
 	private void sendDisconnect(byte[] datagram) {
@@ -384,27 +485,36 @@ public class SecureDelivery {
 		basicMessenger.send(packet.wrap());
 	}
 	
-	private void windUp() {
-		// TODO
+	private void windUp(byte[] datagram) {
+		sendDisconnect(datagram);
+		connectionStage = Stages.NOT_CONNECTED;
+		broadcastOnDisconnect(datagram);
 	}
 	
 	private final class LowLevelReceptor implements BasicReceptor {
 
 		@Override
 		public void receive(byte[] data) {
-			try {
-				resolve(Packet.resolve(data));
-			} catch (DataBrokenException ex) {
-				if(connectionStage < Stages.CONNECTED) {
-					if(connectionStage == Stages.NOT_CONNECTED) {
-						sendBrokenPreRequest(connectionStage);
-					} else if (preRequestReSends.getAndIncrement() < timeoutProfile.preRequestReSends.get()) {
-						sendBrokenPreRequest(connectionStage);
-					} else {
-						windUp();
+			scheduler.schedule(new Runnable() {
+				
+				@Override
+				public void run() {
+					try {
+						resolve(Packet.resolve(data));
+					} catch (DataBrokenException ex) {
+						if(connectionStage < Stages.CONNECTED) {
+							if(connectionStage == Stages.NOT_CONNECTED) {
+								sendBrokenPreRequest(connectionStage);
+							} else if (preRequestReSends++ < timeoutProfile.preRequestReSends.get()) {
+								sendBrokenPreRequest(connectionStage);
+							} else {
+								windUp(BAD_PACKET);
+							}
+						}
 					}
 				}
-			}
+				
+			});
 		}
 		
 	}
@@ -660,6 +770,18 @@ public class SecureDelivery {
 		private static interface Constrain<T> {
 			public T apply(T value);
 		}
+		
+	}
+	
+	public final static class NoConnectionException extends RuntimeException {
+		
+		private static final long serialVersionUID = 1499031180680426223L;
+
+	}
+	
+	public final static class InconsistentStageException extends RuntimeException {
+
+		private static final long serialVersionUID = 896642529227957971L;
 		
 	}
 	

@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-public class TickingScheduler {
+public class TickingScheduler implements Scheduler {
 	
 	private final static int DEFAULT_TICK_INTERVAL = 50;
 	
@@ -29,6 +29,7 @@ public class TickingScheduler {
 		this.tickInterval = tickInterval;
 	}
 	
+	@Override
 	public void start() {
 		runningStatusLock.lock();
 		if(isRunning) {
@@ -39,6 +40,7 @@ public class TickingScheduler {
 		runningStatusLock.unlock();
 		
 		new Thread(new Runnable() {
+			@Override
 			public void run() {
 				for(;;) {
 					if(isStopped) break;
@@ -46,7 +48,14 @@ public class TickingScheduler {
 						List<Runnable> list = agenda.get(time);
 						if(list != null) {
 							for(int i=0;i<list.size();i++) {
-								list.get(i).run();
+								try{
+									list.get(i).run();
+								} catch (RuntimeException ex) {
+									System.err.println(
+											"Unhandled exception occured on schedule process"
+											);
+									ex.printStackTrace();
+								}
 							}
 						}
 						agenda.remove(time);
@@ -62,6 +71,7 @@ public class TickingScheduler {
 		
 	}
 	
+	@Override
 	public boolean isRunning() {
 		runningStatusLock.lock();
 		boolean isRunning = this.isRunning;
@@ -71,10 +81,12 @@ public class TickingScheduler {
 	
 	
 	
+	@Override
 	public void stop() {
 		isStopped = true;
 	}
 	
+	@Override
 	public void schedule(Runnable task) {
 		schedule(task, 0);
 	}
@@ -100,19 +112,17 @@ public class TickingScheduler {
 		}
 	}
 	
-	public final static class Wrapper {
+	public final static class Wrapper extends SchedulerWrapper {
 		
 		private final TickingScheduler scheduler;
 		
-		public Wrapper() {
-			scheduler = new TickingScheduler();
-		}
-		
-		public Wrapper(int tickInterval) {
-			scheduler = new TickingScheduler(tickInterval);
+		public Wrapper(TickingScheduler scheduler) {
+			super(scheduler);
+			this.scheduler = scheduler;
 		}
 		
 		
+		@Override
 		public void schedule(Runnable task) {
 			schedule(task, 0);
 		}
@@ -124,14 +134,6 @@ public class TickingScheduler {
 				}
 			}
 			scheduler.schedule(task, delay);
-		}
-		
-		public void stop(){
-			scheduler.stop();
-		}
-		
-		public boolean isRunning(){
-			return scheduler.isRunning();
 		}
 		
 	}
