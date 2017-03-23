@@ -4,8 +4,12 @@ import java.security.InvalidKeyException;
 import java.security.KeyPair;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import javax.crypto.BadPaddingException;
@@ -64,6 +68,8 @@ public class SecureDelivery {
 	/*
 	 * 	Requester							Acceptor
 	 * 		|									|
+	 * 		|			non-connected			| Stage 0
+	 * 		|									|
 	 * 		|		   connect request			|
 	 * 		|---------------------------------->| Stage 1
 	 * 		|									|
@@ -74,19 +80,24 @@ public class SecureDelivery {
 	 * 		|	  and encrypt by public key		|
 	 * 		|---------------------------------->| Stage 3
 	 * 		|									|
+	 * 		|		  verify session key		|
+	 * PCON	|<----------------------------------| Stage 4 PCON
+	 * 		|									|
 	 * 		|		connection established		|
-	 * 		|<----------------------------------| Stage 4
+	 * 		|---------------------------------->| Stage 5,6 RCON
+	 * 		|									|
+	 * 		|  connection confirm / send data	|
+	 * RCON	|<----------------------------------| Stage 6
 	 * 		|									|
 	 */
-	private byte connectionStage;
+	private int connectionStage;
 	
-	private int keepAliveInterval = 5000;
-	private int deadTime = 20000;
-	private int requestTimeout = 10000;
-	private int requestReSends = 3;
+	public final TimeoutProfile timeoutProfile = new TimeoutProfile();
 	
 	private final Map<String, SecureReceiver> receivers = new HashMap<>();
 	private final ReadWriteLock receiversRWL = new ReentrantReadWriteLock();
+	
+	private AtomicInteger preRequestReSends;
 	
 	public SecureDelivery(String channelName, BasicMessenger basicMessenger) {
 		this(channelName, basicMessenger, DEFAULT_PUBLIC_KEY, DEFAULT_PRIVATE_KEY, DEFAULT_ASYM_CRYPTO, DEFAULT_SYM_CRYPTO);
@@ -105,44 +116,8 @@ public class SecureDelivery {
 		this.symCrypto = symCrypto;
 	}
 	
-	public int getKeepAliveInterval() {
-		return keepAliveInterval;
-	}
-	
-	public void setKeepAliveInterval(int keepAliveInterval) {
-		if(keepAliveInterval < 1000) keepAliveInterval = 1000;
-		this.keepAliveInterval = keepAliveInterval;
-	}
-	
-	public int getDeadTime() {
-		return deadTime;
-	}
-	
-	public void setDeadTime(int deadTime) {
-		if(deadTime < 1000) deadTime = 1000;
-		this.deadTime = deadTime;
-	}
-	
-	public int getRequestTimeout() {
-		return requestTimeout;
-	}
-	
-	public void setRequestTimeout(int requestTimeout) {
-		if(requestTimeout < 1000) requestTimeout = 1000;
-		this.requestTimeout = requestTimeout;
-	}
-	
-	public int getRequestReSends() {
-		return requestReSends;
-	}
-	
-	public void setRequestReSends(int requestReSends) {
-		if(requestReSends < 0) requestReSends = 0;
-		this.requestReSends = requestReSends;
-	}
-	
 	public void send(long tag, byte[] data) {
-		if(connectionStage < 4) throw new NoConnectionException();
+		if(connectionStage < Stages.CONNECTED) throw new NoConnectionException();
 		// TODO
 	}
 	
@@ -179,7 +154,7 @@ public class SecureDelivery {
 	}
 	
 	public void disconnect(byte[] datagram) {
-		if(connectionStage < 4) throw new NoConnectionException();
+		if(connectionStage < Stages.CONNECTED) throw new NoConnectionException();
 		// TODO
 	}
 	
@@ -191,9 +166,10 @@ public class SecureDelivery {
 	 * Manually send keep alive packet.
 	 */
 	public void keepAlive() {
-		if(connectionStage < 4) throw new NoConnectionException();
+		if(connectionStage < Stages.CONNECTED) throw new NoConnectionException();
 		// TODO
 	}
+	
 	
 	public void registerReceiver(String channelName, SecureReceiver receiver) {
 		receiversRWL.writeLock().lock();
@@ -207,26 +183,238 @@ public class SecureDelivery {
 		receiversRWL.writeLock().unlock();
 	}
 	
-	public int getConnectionStage(){
+	
+	public boolean isConnected() {
+		return connectionStage == Stages.CONNECTED;
+	}
+	
+	public int getConnectionStage() {
 		return connectionStage;
+	}
+	
+	
+	private void broadcastReceive(int tag, byte[] data) {
+		receiversRWL.readLock().lock();
+		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+			byte[] clonedData = cloneBytes(data);
+			try {
+				entry.getValue().receive(tag, clonedData);
+			} catch (RuntimeException ex) {
+				System.err.println(
+						"Unhandled exception occured on receiving method \"receive(int, byte[])\" of receiver \""+ 
+								entry.getKey() +"\"");
+				ex.printStackTrace();
+			}
+		}
+		receiversRWL.readLock().unlock();
+	}
+	
+	private void broadcastPostConfirm(int tag) {
+		receiversRWL.readLock().lock();
+		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+			try {
+				entry.getValue().postConfirm(tag);
+			} catch (RuntimeException ex) {
+				System.err.println(
+						"Unhandled exception occured on receiving method \"postConfirm(int)\" of receiver \""+ 
+								entry.getKey() +"\"");
+				ex.printStackTrace();
+			}
+		}
+		receiversRWL.readLock().unlock();
+	}
+	
+	private void broadcastPostBroken(int tag) {
+		receiversRWL.readLock().lock();
+		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+			try {
+				entry.getValue().postBroken(tag);
+			} catch (RuntimeException ex) {
+				System.err.println(
+						"Unhandled exception occured on receiving method \"postBroken(int)\" of receiver \""+ 
+								entry.getKey() +"\"");
+				ex.printStackTrace();
+			}
+		}
+		receiversRWL.readLock().unlock();
+	}
+	
+	private void broadcastOnConnect(byte[] datagram) {
+		receiversRWL.readLock().lock();
+		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+			byte[] clonedDatagram = cloneBytes(datagram);
+			try {
+				entry.getValue().onConnect(clonedDatagram);
+			} catch (RuntimeException ex) {
+				System.err.println(
+						"Unhandled exception occured on receiving method \"onConnect(byte[])\" of receiver \""+ 
+								entry.getKey() +"\"");
+				ex.printStackTrace();
+			}
+		}
+		receiversRWL.readLock().unlock();
+	}
+	
+	private void broadcastOnPublicKeyRespond(byte[] publicKey) {
+		receiversRWL.readLock().lock();
+		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+			byte[] clonedPublicKey = cloneBytes(publicKey);
+			try {
+				entry.getValue().onPublicKeyRespond(clonedPublicKey);
+			} catch (RuntimeException ex) {
+				System.err.println(
+						"Unhandled exception occured on receiving method \"onPublicKeyRespond(byte[])\" of receiver \""+ 
+								entry.getKey() +"\"");
+				ex.printStackTrace();
+			}
+		}
+		receiversRWL.readLock().unlock();
+	}
+	
+	private void broadcastOnConnectionEstablish() {
+		receiversRWL.readLock().lock();
+		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+			try {
+				entry.getValue().onConnectionEstablish();
+			} catch (RuntimeException ex) {
+				System.err.println(
+						"Unhandled exception occured on receiving method \"onConnectionEstablish()\" of receiver \""+ 
+								entry.getKey() +"\"");
+				ex.printStackTrace();
+			}
+		}
+		receiversRWL.readLock().unlock();
+	}
+	
+	private void broadcastOnDisconnect(byte[] datagram) {
+		receiversRWL.readLock().lock();
+		for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
+			byte[] clonedDatagram = cloneBytes(datagram);
+			try {
+				entry.getValue().onDisconnect(clonedDatagram);
+			} catch (RuntimeException ex) {
+				System.err.println(
+						"Unhandled exception occured on receiving method \"onDisconnect(byte[])\" of receiver \""+ 
+								entry.getKey() +"\"");
+				ex.printStackTrace();
+			}
+		}
+		receiversRWL.readLock().unlock();
+	}
+	
+	private static byte[] cloneBytes(byte[] data) {
+		if(data == null) return null;
+		byte[] bytes = new byte[data.length];
+		System.arraycopy(data, 0, bytes, 0, data.length);
+		return bytes;
+	}
+	
+	private void resolve(Packet packet) {
+		// TODO
+	}
+	
+	private void sendDisconnect(byte[] datagram) {
+		byte[] letter = LetterWrapper.wrap(datagram);
+		Packet packet = new Packet(sessionId, Operations.DISCONNECT, 0, letter);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void sendConnect(byte[] datagram) {
+		byte[] letter = LetterWrapper.wrap(datagram);
+		Packet packet = new Packet(sessionId, Operations.CONNECT, 0, letter);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void sendConnectStandBy() {
+		Packet packet = new Packet(sessionId, Operations.CONNECT_STANDBY, 0, EMPTY_BYTE_ARRAY);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void sendPublicKeyOffer(byte[] publicKey) {
+		byte[] letter = LetterWrapper.wrap(publicKey);
+		Packet packet = new Packet(sessionId, Operations.PUBLIC_KEY_OFFER, 0, letter);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void sendPublicKeyStandBy() {
+		Packet packet = new Packet(sessionId, Operations.PUBLIC_KEY_STANDBY, 0, EMPTY_BYTE_ARRAY);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void sendStartSession(byte[] encryptedSessionKey) {
+		byte[] letter = LetterWrapper.wrap(encryptedSessionKey);
+		Packet packet = new Packet(sessionId, Operations.START_SESSION, 0, letter);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void sendBrokenPreRequest(int stage) {
+		Packet packet = new Packet(sessionId, Operations.BROKEN_PRE_REQUEST, stage, EMPTY_BYTE_ARRAY);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void sendConfirmSession(byte[] sessionKey) throws InvalidKeyException, BadPaddingException {
+		byte[] letter = LetterWrapper.wrapAndEncrypt(sessionKey, symCrypto, sessionKey);
+		Packet packet = new Packet(sessionId, Operations.CONFIRM_SESSION, 0, letter);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void sendConnectionEstablish() {
+		Packet packet = new Packet(sessionId, Operations.CONNECTION_ESTABLISH, 0, EMPTY_BYTE_ARRAY);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void sendConectionConfirm() {
+		Packet packet = new Packet(sessionId, Operations.CONNECTION_CONFIRM, 0, EMPTY_BYTE_ARRAY);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void sendData(long tag, byte[] data) throws InvalidKeyException, BadPaddingException {
+		byte[] letter = LetterWrapper.wrapAndEncrypt(data, symCrypto, sessionKey);
+		Packet packet = new Packet(sessionId, Operations.SEND_DATA, tag, letter);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void sendDataConfirm(long tag) {
+		Packet packet = new Packet(sessionId, Operations.CONFIRM_DATA, tag, EMPTY_BYTE_ARRAY);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void sendDataBroken(long tag) {
+		Packet packet = new Packet(sessionId, Operations.BROKEN_DATA, tag, EMPTY_BYTE_ARRAY);
+		basicMessenger.send(packet.wrap());
+	}
+	
+	private void windUp() {
+		// TODO
 	}
 	
 	private final class LowLevelReceptor implements BasicReceptor {
 
 		@Override
 		public void receive(byte[] data) {
-			// TODO Auto-generated method stub
-			
+			try {
+				resolve(Packet.resolve(data));
+			} catch (DataBrokenException ex) {
+				if(connectionStage < Stages.CONNECTED) {
+					if(connectionStage == Stages.NOT_CONNECTED) {
+						sendBrokenPreRequest(connectionStage);
+					} else if (preRequestReSends.getAndIncrement() < timeoutProfile.preRequestReSends.get()) {
+						sendBrokenPreRequest(connectionStage);
+					} else {
+						windUp();
+					}
+				}
+			}
 		}
 		
 	}
+	
 	
 	/*
 	 * Form
 	 * | HEAD CRC | SESSION ID | OPERATION | TAG | LETTER |
 	 *      8B          8B          1B        8B  length-25B
 	 */
-	@SuppressWarnings("unused")
 	private final static class Operations {
 		public final static byte DISCONNECT = 0;
 		public final static byte CONNECT = 1;
@@ -234,13 +422,25 @@ public class SecureDelivery {
 		public final static byte PUBLIC_KEY_OFFER = 3;
 		public final static byte PUBLIC_KEY_STANDBY = 4;
 		public final static byte START_SESSION = 5;
-		
-		public final static byte CONFIRM_SESSION = 6;
-		public final static byte CONNECTION_ESTABLISH = 7;
-		public final static byte SEND_DATA = 8;
-		public final static byte CONFIRM_DATA = 9;
-		public final static byte BROKEN_DATA = 10;
+		public final static byte BROKEN_PRE_REQUEST = 6;
+		public final static byte CONFIRM_SESSION = 7; //ENCRYPTED
+		public final static byte CONNECTION_ESTABLISH = 8;
+		public final static byte CONNECTION_CONFIRM = 9;
+		public final static byte SEND_DATA = 10; // ENCRYPTED
+		public final static byte CONFIRM_DATA = 11;
+		public final static byte BROKEN_DATA = 12;
 	}
+	
+	public final static class Stages {
+		public final static int NOT_CONNECTED = 0;
+		public final static int CONNECT_REQUEST_SENT = 1;
+		public final static int PUBLIC_KEY_OFFERED = 2;
+		public final static int SESSION_KEY_SENT = 3;
+		public final static int SESSION_VERIFICATION_SENT = 4;
+		public final static int CONNECTION_ESTABLISHING = 5;
+		public final static int CONNECTED = 6;
+	}
+	
 	
 	public final static class LetterWrapper {
 		
@@ -285,6 +485,7 @@ public class SecureDelivery {
 		
 		private LetterWrapper() {}
 	}
+	
 	
 	public final static class Packet {
 		
@@ -359,18 +560,20 @@ public class SecureDelivery {
 		
 	}
 	
+	
 	public final static class DataBrokenException extends Exception {
 		
 		private static final long serialVersionUID = 5943658912911088754L;
 		
 	}
 	
+	
 	public final static class TimeoutProfile {
 		
 		public final SingleProfile<Integer> connectRequestTimeout = 
 				new SingleProfile<Integer>(new TimeoutConstrain(10000), 10000);
 		public final SingleProfile<Integer> connectRequestReSends = 
-				new SingleProfile<Integer>(new ReSendsConstrain(10), 10);
+				new SingleProfile<Integer>(new ReSendsConstrain(3), 3);
 		
 		public final SingleProfile<Integer> publicKeyOfferWaitTimeout = 
 				new SingleProfile<Integer>(new TimeoutConstrain(600000), 600000);
@@ -392,6 +595,14 @@ public class SecureDelivery {
 				new SingleProfile<Integer>(new TimeoutConstrain(10000), 10000);
 		public final SingleProfile<Integer> connectionEstablishReSends = 
 				new SingleProfile<Integer>(new ReSendsConstrain(5), 5);
+		
+		public final SingleProfile<Integer> connectionTimeout = 
+				new SingleProfile<Integer>(new TimeoutConstrain(20000), 20000);
+		public final SingleProfile<Integer> keepAliveDelay = 
+				new SingleProfile<Integer>(new TimeoutConstrain(5000), 5000);
+		
+		public final SingleProfile<Integer> preRequestReSends = 
+				new SingleProfile<Integer>(new ReSendsConstrain(20), 20);
 		
 		private final static class TimeoutConstrain implements Constrain<Integer> {
 			
@@ -451,6 +662,7 @@ public class SecureDelivery {
 		}
 		
 	}
+	
 	
 	/*public static void main(String[] args) throws InvalidKeyException, BadPaddingException {
 		
