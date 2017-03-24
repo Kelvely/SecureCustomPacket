@@ -728,7 +728,7 @@ public class SecureDelivery {
 	// Requester side
 	private void handleConnectStandBy(Packet packet) {
 		if((!isStageConsistent(Stages.CONNECT_REQUEST_SENT)) || (packet.head.sessionId != sessionId)) return;
-		// TODO
+		// TODO <<<<<<<<<<<<<<<<<<<<<<< HERE :D!
 	}
 	
 	// Requester side
