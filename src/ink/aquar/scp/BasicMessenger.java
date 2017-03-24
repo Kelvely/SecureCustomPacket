@@ -20,16 +20,17 @@ public interface BasicMessenger {
 	public void send(byte[] data);
 	
 	/**
-	 * To register a receptor with a unique channel name.
+	 * To register a receptor with a unique channel name.<br>
 	 * 
-	 * @param name The unique channel name that you can unregister the receptor later.
-	 * @param receptor The receptor that receives the message.
+	 * @param name The unique channel name that you can unregister the receptor later
+	 * @param receptor The receptor that receives the message
 	 */
 	public void registerReceptor(String name, BasicReceptor receptor);
 	
 	/**
-	 * To unregister a receptor by its unique channel name.
-	 * @param name The unique channel name set when register the receptor.
+	 * To unregister a receptor by its unique channel name.<br>
+	 * 
+	 * @param name The unique channel name set when register the receptor
 	 */
 	public void unregisterReceptor(String name);
 
