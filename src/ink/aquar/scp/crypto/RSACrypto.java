@@ -19,6 +19,16 @@ import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 
+/**
+ * An implementation of RSA AsymmetricCrypto by using java provided security implementations.<br>
+ * 
+ * @see AsymmetricCrypto
+ * @see Cryptos
+ * 
+ * @author Aquarink Studio
+ * @author Kevin Iry
+ *
+ */
 public class RSACrypto implements AsymmetricCrypto {
 	
 	private final static String KEY_ALGORITHM = "RSA";

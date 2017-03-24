@@ -6,6 +6,17 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * An implementation of Scheduler, creating a new Thread to sync the tasks.<br>
+ * <br>
+ * This is a single thread scheduler.<br>
+ * 
+ * @see Scheduler
+ * 
+ * @author Aquarink Studio
+ * @author Kevin Iry
+ *
+ */
 public class QueueScheduler implements Scheduler {
 	
 	private final List<Runnable> schedule = new LinkedList<Runnable>();
@@ -84,6 +95,9 @@ public class QueueScheduler implements Scheduler {
 	@Override
 	public void stop() {
 		isStopped = true;
+		awaitLock.lock();
+        awaitCondition.signalAll();
+        awaitLock.unlock();
 	}
 
 }

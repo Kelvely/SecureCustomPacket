@@ -10,6 +10,16 @@ import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
+/**
+ * An implementation of AES 128 SymmetricCrypto by using java provided security implementations.<br>
+ * 
+ * @see SymmetricCrypto
+ * @see Crypto
+ * 
+ * @author Aquarink Studio
+ * @author Kevin Iry
+ *
+ */
 public class AESCrypto implements SymmetricCrypto {
 	
 	private final static String KEY_ALGORITHM = "AES";
@@ -55,10 +65,6 @@ public class AESCrypto implements SymmetricCrypto {
 	
 	private static SecretKey toKey(byte[] key) {
 		return new SecretKeySpec(key, KEY_ALGORITHM);
-	}
-	
-	public static SecretKey genKeyPair(){
-		return KEY_GENERATOR.generateKey();
 	}
 
 	@Override

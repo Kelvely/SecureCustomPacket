@@ -1,5 +1,14 @@
 package ink.aquar.scp;
 
+/**
+ * The interface that library user should implement in order to receive packets from SecureDelivery.<br>
+ * 
+ * @see SecureDelivery
+ * 
+ * @author Aquarink Studio
+ * @author Kevin Iry
+ *
+ */
 public interface SecureReceiver {
 	
 	/**

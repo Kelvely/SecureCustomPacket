@@ -3,8 +3,21 @@ package ink.aquar.scp.util;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+/**
+ * Utilities for primitives-bytes conversion.<br>
+ * 
+ * @author Aquarink Studio
+ * @author Kevin Iry
+ *
+ */
 public class ByteWrapper {
 	
+	/**
+	 * Turn primitives into bytes, or turn other objects.toString() into bytes.<br>
+	 * 
+	 * @param object The object that you want to turn into bytes
+	 * @return The converted bytes
+	 */
 	public static byte[] toBytes(Object object) {
 		if(object instanceof Boolean) {
 			return new byte[] {
@@ -53,6 +66,14 @@ public class ByteWrapper {
 		}
 	}
 	
+	/**
+	 * Turn primitives into bytes, or turn other objects.toString() into bytes, 
+	 * and put them into a existing byte array.<br>
+	 * 
+	 * @param object The object that you want to turn into bytes
+	 * @param bytes The array that you want to put the converted bytes
+	 * @param start From which index starts you want to put converted bytes into the array
+	 */
 	public static void toBytes(Object object, byte[] bytes, int start) {
 		if(start >= bytes.length) return;
 		byte[] data = toBytes(object);
@@ -69,6 +90,15 @@ public class ByteWrapper {
 		}
 	}
 	
+	/**
+	 * Convert bytes into a primitive or String.<br>
+	 * 
+	 * @param bytes The array of bytes that is going to put into the process of conversion
+	 * @param start The start index in array of the bytes that is going to convert
+	 * @param outputType The type that you want to convert the bytes into
+	 * 
+	 * @return Converted objects
+	 */
 	public static <T> T fromBytes(byte[] bytes, int start, OutputType<T> outputType) {
 		return outputType.fromBytes(bytes, start);
 	}
@@ -280,6 +310,12 @@ public class ByteWrapper {
 				'C', 'D', 'E', 'F'
 				};
 	
+	/**
+	 * Convert a array of bytes into hexadecimal sequence in form of String.<br>
+	 * 
+	 * @param bytes The array of bytes that you want to convert
+	 * @return Converted String of hexadecimal sequence
+	 */
 	public static String toHexString(byte[] bytes) {
 		StringBuilder stringBuilder = new StringBuilder();
 		for (byte b : bytes) {
@@ -289,6 +325,13 @@ public class ByteWrapper {
 		return stringBuilder.toString();
 	}
 	
+	/**
+	 * Convert a array of bytes into hexadecimal sequence in form of String with spaces 
+	 * inserted between each byte.<br>
+	 * 
+	 * @param bytes The array of bytes that you want to convert
+	 * @return Converted String of hexadecimal sequence
+	 */
 	public static String toHexStringWithSpace(byte[] bytes) {
 		StringBuilder stringBuilder = new StringBuilder();
 		for (byte b : bytes) {

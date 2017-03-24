@@ -23,16 +23,21 @@ import ink.aquar.scp.util.SchedulerWrapper;
 import ink.aquar.scp.util.TickingScheduler;
 
 /**
- * 
- * <h1>If you want to deny some requester's connection, please deny it on BasicReceptor implementation.<br>
+ * <h1>If you want to deny some requester's connection, please deny it on BasicReceptor implementation.</h1><br>
  * <br>
  * This Delivery is one-to-one connection, thus server need multiple deliveries.<br>
  * <br>
- * THIS IS NOT THREAD SAFE UNLESS YOU PUT SYNC SCHEDULER FOR DELIVERY!<br>
- * QueueScheduler, which is default, is recommended for scheduler delivery.
+ * <h1>You have to implement SecureReceiver to receive packets.</h1><br>
  * <br>
+ * Since scheduler are involved, you can choose whether use a customized scheduler or use a default 
+ * scheduler to sync packets. Feel free on async packets submitted to SecureDelivery!<br>
+ * <br>
+ * 
+ * @see SecureReceiver
+ * @see BasicMessenger
+ * 
  * @author Aquarink Studio
- *
+ * @author Kevin Iry
  */
 public class SecureDelivery {
 	// Fields that labeled 'Complete' means here should have no more development related to this field.
@@ -106,13 +111,20 @@ public class SecureDelivery {
 	
 	private final Map<String, SecureReceiver> receivers = new HashMap<>(); // Complete.
 	
-	private int preRequestReSends; // Complete.
+	private int preRequestReSends;
 	
 	/*
-	 * You can implement a BukkitManagedScheduler :P while BukkitScheduler is already used.
+	 * You can implement a BukkitManagedScheduler :P while BukkitScheduler is already exists.
 	 */
 	private final SchedulerWrapper scheduler; 
 	
+	/**
+	 * Construct a SecureDelivery by default public key and private key, which are auto generated, 
+	 * RSA as asymmetric crypto, and AES 128 as symmetric crypto, 
+	 * and SecureDelivery public schedule bus as scheduler to sync packets.<br>
+	 * @param channelName The channel name of the SecureDelivery's registry on basicMessenger.
+	 * @param basicMessenger The messenger that provide simple IO for delivery.
+	 */
 	public SecureDelivery(String channelName, BasicMessenger basicMessenger) {
 		this(
 				channelName, basicMessenger, 
@@ -121,6 +133,12 @@ public class SecureDelivery {
 				);
 	}
 	
+	/**
+	 * 
+	 * @param channelName The channel name of the SecureDelivery's registry on basicMessenger.
+	 * @param basicMessenger The messenger that provide simple IO for delivery.
+	 * @param scheduler The scheduler to sync packets.
+	 */
 	public SecureDelivery(String channelName, BasicMessenger basicMessenger, Scheduler scheduler) {
 		this(
 				channelName, basicMessenger, 
@@ -422,11 +440,129 @@ public class SecureDelivery {
 		return bytes;
 	}
 	
-	private void resolve(Packet packet) {
-		// TODO
-		// TODO
-		// TODO!!!!
+	private void handle(Packet packet) {
+		
+		switch (packet.head.operation) {
+		
+		case Operations.SEND_DATA:
+			handleSendData(packet);
+			break;
+			
+		case Operations.CONFIRM_DATA:
+			handleConfirmData(packet);
+			break;
+			
+		case Operations.BROKEN_DATA:
+			handleBrokenData(packet);
+			break;
+			
+		case Operations.KEEP_ALIVE:
+			handleKeepAlive(packet);
+			break;
+		
+		//These 4 packets are frequently sent, put them here as optimization :P
+			
+		case Operations.DISCONNECT:
+			handleDisconnect(packet);
+			break;
+
+		case Operations.CONNECT:
+			handleConnect(packet);
+			break;
+			
+		case Operations.CONNECT_STANDBY:
+			handleConnectStandBy(packet);
+			break;
+			
+		case Operations.PUBLIC_KEY_OFFER:
+			handlePublicKeyOffer(packet);
+			break;
+			
+		case Operations.PUBLIC_KEY_STANDBY:
+			handlePublicKeyStandBy(packet);
+			break;
+			
+		case Operations.START_SESSION:
+			handleStartSession(packet);
+			break;
+			
+		case Operations.BROKEN_PRE_REQUEST:
+			handleBrokenPreRequest(packet);
+			break;
+			
+		case Operations.CONFIRM_SESSION:
+			handleConfirmSession(packet);
+			break;
+			
+		case Operations.CONNECTION_ESTABLISH:
+			handleConnectionEstablish(packet);
+			break;
+			
+		case Operations.CONNECTION_CONFIRM:
+			handleConnectionConfirm(packet);
+			break;
+			
+		}
+		
 	}
+	
+	
+	private void handleDisconnect(Packet packet) {
+		// TODO
+	}
+	
+	private void handleConnect(Packet packet) {
+		// TODO
+	}
+	
+	private void handleConnectStandBy(Packet packet) {
+		// TODO
+	}
+	
+	private void handlePublicKeyOffer(Packet packet) {
+		// TODO
+	}
+	
+	private void handlePublicKeyStandBy(Packet packet) {
+		// TODO
+	}
+	
+	private void handleStartSession(Packet packet) {
+		// TODO
+	}
+	
+	private void handleBrokenPreRequest(Packet packet) {
+		// TODO
+	}
+	
+	private void handleConfirmSession(Packet packet) {
+		// TODO
+	}
+	
+	private void handleConnectionEstablish(Packet packet) {
+		// TODO
+	}
+	
+	private void handleConnectionConfirm(Packet packet) {
+		// TODO
+	}
+	
+	private void handleSendData(Packet packet) {
+		// TODO
+	}
+	
+	private void handleConfirmData(Packet packet) {
+		// TODO
+	}
+	
+	private void handleBrokenData(Packet packet) {
+		// TODO
+	}
+	
+	private void handleKeepAlive(Packet packet) {
+		// TODO
+	}
+	
 	
 	private void sendDisconnect(byte[] datagram) {
 		byte[] letter = LetterWrapper.wrap(datagram);
@@ -514,7 +650,7 @@ public class SecureDelivery {
 				@Override
 				public void run() {
 					try {
-						resolve(Packet.resolve(data));
+						handle(Packet.resolve(data));
 					} catch (DataBrokenException ex) {
 						if(connectionStage < Stages.CONNECTED) {
 							if(connectionStage == Stages.NOT_CONNECTED) {
@@ -553,6 +689,7 @@ public class SecureDelivery {
 		public final static byte SEND_DATA = 10; // ENCRYPTED
 		public final static byte CONFIRM_DATA = 11;
 		public final static byte BROKEN_DATA = 12;
+		public static final int KEEP_ALIVE = 13;
 	}
 	
 	public final static class Stages {
