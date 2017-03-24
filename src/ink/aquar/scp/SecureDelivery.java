@@ -23,6 +23,14 @@ import ink.aquar.scp.util.SchedulerWrapper;
 import ink.aquar.scp.util.TickingScheduler;
 
 /**
+ * SecureDeliver provides secure connection between two terminals. It provides data validity verification, 
+ * applicable for most of the stream communicator, which need to be connected in a BasicMessenger. It will 
+ * work pretty well on UDP communications(P.S. If you can use TCP, then you should use SSH instead of this), 
+ * and firstly, this class is put in use in secure communication of Minecraft CustomPacket.<br>
+ * <br>
+ * Packet timeout or damage handle policies should be considered by library user when implementing 
+ * SecureReceiver, because SecureDelivery provides only data verification, but not damaged data handle.<br>
+ * <br>
  * <h1>If you want to deny some requester's connection, please deny it on BasicReceptor implementation.</h1><br>
  * <br>
  * This Delivery is one-to-one connection, thus server need multiple deliveries.<br>
@@ -31,6 +39,7 @@ import ink.aquar.scp.util.TickingScheduler;
  * <br>
  * Since scheduler are involved, you can choose whether use a customized scheduler or use a default 
  * scheduler to sync packets. Feel free on async packets submitted to SecureDelivery!<br>
+ * In addition, receivers receive from scheduler's thread.<br>
  * <br>
  * 
  * @see SecureReceiver
@@ -60,7 +69,11 @@ public class SecureDelivery {
 	private final static TickingScheduler.Wrapper TICK_SCHEDULER = new TickingScheduler.Wrapper(new TickingScheduler());
 	
 	private final static byte[] BAD_PACKET = "BAD_PACKET".getBytes();
+	private final static byte[] BAD_PUBLIC_KEY = "BAD_PUBLIC_KEY".getBytes();
+	private final static byte[] BAD_SESSION_KEY = "BAD_SESSION_KEY".getBytes();
 	private final static byte[] TIMEOUT = "TIMEOUT".getBytes();
+	private final static byte[] INVALID_SESSION_KEY = "INVALID_SESSION_KEY".getBytes();
+	private final static byte[] CONNECT_REJECT = "CONNECT_REJECT".getBytes();
 	
 	private final static Scheduler DEFAULT_SCHEDULER = new QueueScheduler(); // Complete.
 	
@@ -102,16 +115,24 @@ public class SecureDelivery {
 	 * 		|  connection confirm / send data	|
 	 * RCON	|<----------------------------------| Stage 6
 	 * 		|									|
+	 * 
+	 * TODO
 	 */
 	private int connectionStage;
 	
 	private TimeoutTask nextTimeout;
+	private TimeoutTask standByTimeout;
 	
 	public final TimeoutProfile timeoutProfile = new TimeoutProfile(); // Complete.
 	
 	private final Map<String, SecureReceiver> receivers = new HashMap<>(); // Complete.
 	
-	private int preRequestReSends;
+	private int preRequestResends;
+	
+	private byte[] encryptedSessionKey;
+	
+	private boolean isAcceptor; // Which means is bottom lol :D
+	// TODO On sending, and accepting. // Sending is done :)
 	
 	/*
 	 * You can implement a BukkitManagedScheduler :P while BukkitScheduler is already exists.
@@ -172,21 +193,27 @@ public class SecureDelivery {
 		this.scheduler = new SchedulerWrapper(scheduler);
 	}
 	
-	
-	
+	//////////////////////////////////////////////// Any side
 	
 	public void send(long tag, byte[] data) {
 		scheduler.schedule(new Runnable() {
 			
 			@Override
 			public void run() {
-				checkConnection();
-				// TODO
+				if(!isStageConsistent(Stages.CONNECTED)) return;
+				try {
+					sendData(tag, data);
+				} catch (InvalidKeyException ex) {
+					windUp(INVALID_SESSION_KEY);
+				} catch (BadPaddingException ex) {
+					ex.printStackTrace();
+				}
 			}
 			
 		});
 	}
 	
+	//////////////////////////////////////////////// Requester side
 	
 	//Simplification
 	public void connect() {
@@ -198,11 +225,53 @@ public class SecureDelivery {
 			
 			@Override
 			public void run() {
-				checkStage(Stages.NOT_CONNECTED);
-				// TODO
+				if(!isStageConsistent(Stages.NOT_CONNECTED)) return;
+				
+				setStage(Stages.CONNECT_REQUEST_SENT);
+				isAcceptor = false;
+				changeSessionId();
+				
+				sendConnect(datagram);
+				
+				TimeoutTask standByTask = new WindUpTask();
+				TICK_SCHEDULER.schedule(standByTask, timeoutProfile.publicKeyOfferWaitTimeout.get());
+				standByTimeout = standByTask;
+				
+				TimeoutTask timeoutTask = new ConnectTimeoutTask(0, datagram);
+				TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectRequestTimeout.get());
+				nextTimeout = timeoutTask;
 			}
 			
 		});
+	}
+	
+	private final class ConnectTimeoutTask extends TimeoutTask {
+		
+		private final byte[] datagram;
+		
+		public ConnectTimeoutTask(int timeoutLeft, byte[] datagram) {
+			super(timeoutLeft);
+			this.datagram = datagram;
+		}
+
+		@Override
+		public void run() {
+			scheduler.schedule(new Runnable() {
+				@Override
+				public void run() {
+					if(isCancelled) return;
+					if(timeoutLeft < timeoutProfile.connectRequestResends.get()) {
+						sendConnect(datagram);
+						TimeoutTask timeoutTask = new ConnectTimeoutTask(timeoutLeft + 1, datagram);
+						TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectRequestTimeout.get());
+						nextTimeout = timeoutTask;
+					} else {
+						windUp(TIMEOUT);
+					}
+				}
+			});
+		}
+		
 	}
 	
 	//Simplification
@@ -210,58 +279,144 @@ public class SecureDelivery {
 		connect(message.getBytes());
 	}
 	
+	//////////////////////////////////////////////// Acceptor side
 	
 	public void respondConnect(boolean confirmation) {
 		scheduler.schedule(new Runnable() {
 			
 			@Override
 			public void run() {
-				checkStage(Stages.CONNECT_REQUEST_SENT);
-				// TODO
+				if(!isAcceptor) return;
+				if(!isStageConsistent(Stages.CONNECT_REQUEST_SENT)) return;
+				if(confirmation) {
+					setStage(Stages.PUBLIC_KEY_OFFERED);
+					
+					sendPublicKeyOffer(publicKey);
+					
+					TimeoutTask standByTask = new WindUpTask();
+					TICK_SCHEDULER.schedule(standByTask, timeoutProfile.startSessionWaitTimeout.get());
+					standByTimeout = standByTask;
+					
+					TimeoutTask timeoutTask = new PublicKeyTimeoutTask(0);
+					TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.publicKeyOfferTimeout.get());
+					nextTimeout = timeoutTask;
+				} else {
+					windUp(CONNECT_REJECT);
+				}
 			}
 			
 		});
 	}
 	
+	private final class PublicKeyTimeoutTask extends TimeoutTask {
+
+		public PublicKeyTimeoutTask(int timeoutLeft) {
+			super(timeoutLeft);
+		}
+
+		@Override
+		public void run() {
+			scheduler.schedule(new Runnable() {
+				@Override
+				public void run() {
+					if(isCancelled) return;
+					if(timeoutLeft < timeoutProfile.publicKeyOfferResends.get()) {
+						sendPublicKeyOffer(publicKey);
+						TimeoutTask timeoutTask = new PublicKeyTimeoutTask(timeoutLeft + 1);
+						TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.publicKeyOfferTimeout.get());
+						nextTimeout = timeoutTask;
+					} else {
+						windUp(TIMEOUT);
+					}
+				}
+			});
+		}
+		
+	}
+	
+	//////////////////////////////////////////////// Acceptor side
 	
 	public void connectStandBy(){
 		scheduler.schedule(new Runnable() {
 			
 			@Override
 			public void run() {
-				checkStage(Stages.CONNECT_REQUEST_SENT);
-				// TODO
+				if(!isAcceptor) return;
+				if(!isStageConsistent(Stages.CONNECT_REQUEST_SENT)) return;
+				sendConnectStandBy();
 			}
 			
 		});
 	}
 	
-	
+	//////////////////////////////////////////////// Requester side
+	//
 	public void respondPublicKey(boolean confirmation) {
 		scheduler.schedule(new Runnable() {
 			
 			@Override
 			public void run() {
-				checkStage(Stages.PUBLIC_KEY_OFFERED);
-				// TODO
+				if(isAcceptor) return;
+				if(!isStageConsistent(Stages.PUBLIC_KEY_OFFERED)) return;
+				if(confirmation) {
+					setStage(Stages.SESSION_KEY_SENT);
+					
+					sendStartSession(encryptedSessionKey);
+					
+					TimeoutTask timeoutTask = new SessionStartTimeoutTask(0);
+					TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.startSessionTimeout.get());
+					nextTimeout = timeoutTask;
+				} else {
+					windUp(CONNECT_REJECT);
+				}
 			}
 			
 		});
 	}
 	
+	private final class SessionStartTimeoutTask extends TimeoutTask {
+
+		public SessionStartTimeoutTask(int timeoutLeft) {
+			super(timeoutLeft);
+		}
+
+		@Override
+		public void run() {
+			scheduler.schedule(new Runnable() {
+				@Override
+				public void run() {
+					if(isCancelled) return;
+					if(timeoutLeft < timeoutProfile.startSessionResends.get()) {
+						sendStartSession(encryptedSessionKey);
+						
+						TimeoutTask timeoutTask = new SessionStartTimeoutTask(timeoutLeft + 1);
+						TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.startSessionTimeout.get());
+						nextTimeout = timeoutTask;
+					} else {
+						windUp(TIMEOUT);
+					}
+				}
+			});
+		}
+		
+	}
 	
-	public void publicKeyStandBy(){
+	//////////////////////////////////////////////// Requester side
+	
+	public void publicKeyStandBy() {
 		scheduler.schedule(new Runnable() {
 			
 			@Override
 			public void run() {
-				checkStage(Stages.PUBLIC_KEY_OFFERED);
-				// TODO
+				if(isAcceptor) return;
+				if(!isStageConsistent(Stages.PUBLIC_KEY_OFFERED)) return;
+				sendPublicKeyStandBy();
 			}
 			
 		});
 	}
 	
+	//////////////////////////////////////////////// Any side
 	
 	//Simplification
 	public void disconnect() {
@@ -273,8 +428,8 @@ public class SecureDelivery {
 			
 			@Override
 			public void run() {
-				checkConnection();
-				// TODO
+				if(!isStageConsistent(Stages.CONNECTED)) return;
+				windUp(datagram);
 			}
 			
 		});
@@ -285,6 +440,7 @@ public class SecureDelivery {
 		disconnect(message.getBytes());
 	}
 	
+	//////////////////////////////////////////////// Any side
 	
 	/**
 	 * Manually send keep alive packet.
@@ -294,20 +450,50 @@ public class SecureDelivery {
 			
 			@Override
 			public void run() {
-				checkConnection();
-				// TODO
+				if(!isStageConsistent(Stages.CONNECTED)) return;
+				sendKeepAlive();
 			}
 			
 		});
 	}
 	
+	//////////////////////////////////////////////// <<<<<<<<<
 	
-	private void checkStage(int stage) {
-		if(connectionStage != stage) throw new InconsistentStageException();
+	private final class WindUpTask extends TimeoutTask {
+
+		public WindUpTask() {
+			super(0);
+		}
+		
+		@Override
+		public void run() {
+			scheduler.schedule(new Runnable() {
+				@Override
+				public void run() {
+					if(isCancelled) return;
+					windUp(TIMEOUT);
+				}
+			});
+		}
+		
 	}
 	
-	private void checkConnection() {
-		if(connectionStage < Stages.CONNECTED) throw new NoConnectionException();
+	private boolean isStageConsistent(int stage) {
+		return connectionStage == stage;
+	}
+	
+	private void setStage(int stage) {
+		connectionStage = stage;
+	}
+	
+	private void changeSessionId() {
+		for(;;) {
+			long randomLong = RANDOM.nextLong();
+			if(randomLong != sessionId) {
+				sessionId = randomLong;
+				break;
+			}
+		}
 	}
 	
 	
@@ -442,6 +628,8 @@ public class SecureDelivery {
 	
 	private void handle(Packet packet) {
 		
+		if(!(packet.head.sessionId == sessionId || isStageConsistent(Stages.NOT_CONNECTED))) return;
+		
 		switch (packet.head.operation) {
 		
 		case Operations.SEND_DATA:
@@ -506,60 +694,114 @@ public class SecureDelivery {
 		
 	}
 	
-	
+	// Any side
 	private void handleDisconnect(Packet packet) {
-		// TODO
+		if(isStageConsistent(Stages.NOT_CONNECTED)) return;
+		byte[] datagram;
+		try {
+			datagram = LetterWrapper.resolve(packet.letter);
+		} catch (DataBrokenException ex) {
+			datagram = null;
+		}
+		windUpLocal(datagram);
 	}
 	
+	// Acceptor side
 	private void handleConnect(Packet packet) {
-		// TODO
+		if((!isStageConsistent(Stages.NOT_CONNECTED))) return;
+		
+		byte[] datagram;
+		try {
+			datagram = LetterWrapper.resolve(packet.letter);
+		} catch (DataBrokenException ex) {
+			sendBrokenPreRequest(connectionStage);
+			return;
+		}
+		
+		isAcceptor = true;
+		sessionId = packet.head.sessionId;
+		setStage(Stages.CONNECT_REQUEST_SENT);
+		
+		broadcastOnConnect(datagram);
 	}
 	
+	// Requester side
 	private void handleConnectStandBy(Packet packet) {
+		if((!isStageConsistent(Stages.CONNECT_REQUEST_SENT)) || (packet.head.sessionId != sessionId)) return;
 		// TODO
 	}
 	
+	// Requester side
 	private void handlePublicKeyOffer(Packet packet) {
+		if((!isStageConsistent(Stages.CONNECT_REQUEST_SENT)) || (packet.head.sessionId != sessionId)) return;
 		// TODO
 	}
 	
+	// Acceptor side
 	private void handlePublicKeyStandBy(Packet packet) {
+		if((!isStageConsistent(Stages.PUBLIC_KEY_OFFERED)) || (packet.head.sessionId != sessionId)) return;
 		// TODO
 	}
 	
+	// Acceptor side
 	private void handleStartSession(Packet packet) {
+		if((!isStageConsistent(Stages.PUBLIC_KEY_OFFERED)) || (packet.head.sessionId != sessionId)) return;
 		// TODO
 	}
 	
+	// Any side
 	private void handleBrokenPreRequest(Packet packet) {
-		// TODO
+		if(packet.head.tag == Stages.NOT_CONNECTED && isStageConsistent(Stages.CONNECT_REQUEST_SENT)) {
+			// TODO Re-send the connect request.
+		} else if(packet.head.sessionId != sessionId) {
+			return;
+		} else if(isStageConsistent((int) packet.head.tag + 1)){
+			// TODO Re-send the request.
+		}
 	}
 	
+	// Requester side
 	private void handleConfirmSession(Packet packet) {
+		if((!isStageConsistent(Stages.SESSION_KEY_SENT)) || (packet.head.sessionId != sessionId)) return;
 		// TODO
 	}
 	
+	// Acceptor side
 	private void handleConnectionEstablish(Packet packet) {
+		if((!isStageConsistent(Stages.SESSION_VERIFICATION_SENT)) || (packet.head.sessionId != sessionId)) return;
 		// TODO
 	}
 	
+	// Requester side
 	private void handleConnectionConfirm(Packet packet) {
-		// TODO
+		if((!isStageConsistent(Stages.CONNECTION_ESTABLISHING)) || (packet.head.sessionId != sessionId)) return;
+		// TODO Establish the connection
 	}
 	
+	// Any side, special for requester side as connection confirm
 	private void handleSendData(Packet packet) {
+		if(packet.head.sessionId != sessionId) return;
+		if(isStageConsistent(Stages.CONNECTION_ESTABLISHING)) {
+			// TODO Establish the connection
+		} else if (!isStageConsistent(Stages.CONNECTED)) return;
 		// TODO
 	}
 	
+	// Any side
 	private void handleConfirmData(Packet packet) {
+		if((!isStageConsistent(Stages.CONNECTED)) || (packet.head.sessionId != sessionId)) return;
 		// TODO
 	}
 	
+	// Any side
 	private void handleBrokenData(Packet packet) {
+		if((!isStageConsistent(Stages.CONNECTED)) || (packet.head.sessionId != sessionId)) return;
 		// TODO
 	}
 	
+	// Any side
 	private void handleKeepAlive(Packet packet) {
+		if((!isStageConsistent(Stages.CONNECTED)) || (packet.head.sessionId != sessionId)) return;
 		// TODO
 	}
 	
@@ -635,9 +877,27 @@ public class SecureDelivery {
 		basicMessenger.send(packet.wrap());
 	}
 	
+	private void sendKeepAlive() {
+		Packet packet = new Packet(sessionId, Operations.KEEP_ALIVE, 0, EMPTY_BYTE_ARRAY);
+		basicMessenger.send(packet.wrap());
+	}
+	
 	private void windUp(byte[] datagram) {
 		sendDisconnect(datagram);
-		connectionStage = Stages.NOT_CONNECTED;
+		windUpLocal(datagram);
+	}
+	
+	private void windUpLocal(byte[] datagram) {
+		setStage(Stages.NOT_CONNECTED);
+		changeSessionId();
+		if(standByTimeout != null) {
+			standByTimeout.cancel();
+			standByTimeout = null;
+		}
+		if(nextTimeout != null) {
+			standByTimeout.cancel();
+			standByTimeout = null;
+		}
 		broadcastOnDisconnect(datagram);
 	}
 	
@@ -649,13 +909,16 @@ public class SecureDelivery {
 				
 				@Override
 				public void run() {
+					
 					try {
-						handle(Packet.resolve(data));
+						Packet packet = Packet.resolve(data);
+						preRequestResends = 0;
+						handle(packet);
 					} catch (DataBrokenException ex) {
-						if(connectionStage < Stages.CONNECTED) {
+						if(!isStageConsistent(Stages.CONNECTED)) {
 							if(connectionStage == Stages.NOT_CONNECTED) {
 								sendBrokenPreRequest(connectionStage);
-							} else if (preRequestReSends++ < timeoutProfile.preRequestReSends.get()) {
+							} else if (preRequestResends++ < timeoutProfile.preRequestResends.get()) {
 								sendBrokenPreRequest(connectionStage);
 							} else {
 								windUp(BAD_PACKET);
@@ -689,7 +952,7 @@ public class SecureDelivery {
 		public final static byte SEND_DATA = 10; // ENCRYPTED
 		public final static byte CONFIRM_DATA = 11;
 		public final static byte BROKEN_DATA = 12;
-		public static final int KEEP_ALIVE = 13;
+		public final static byte KEEP_ALIVE = 13;
 	}
 	
 	public final static class Stages {
@@ -701,6 +964,7 @@ public class SecureDelivery {
 		public final static int CONNECTION_ESTABLISHING = 5;
 		public final static int CONNECTED = 6;
 	}
+	
 	
 	
 	public final static class LetterWrapper {
@@ -746,6 +1010,7 @@ public class SecureDelivery {
 		
 		private LetterWrapper() {}
 	}
+	
 	
 	
 	public final static class Packet {
@@ -833,37 +1098,37 @@ public class SecureDelivery {
 		
 		public final SingleProfile<Integer> connectRequestTimeout = 
 				new SingleProfile<Integer>(new TimeoutConstrain(10000), 10000);
-		public final SingleProfile<Integer> connectRequestReSends = 
-				new SingleProfile<Integer>(new ReSendsConstrain(3), 3);
+		public final SingleProfile<Integer> connectRequestResends = 
+				new SingleProfile<Integer>(new ResendsConstrain(3), 3);
 		
 		public final SingleProfile<Integer> publicKeyOfferWaitTimeout = 
 				new SingleProfile<Integer>(new TimeoutConstrain(600000), 600000);
 		
 		public final SingleProfile<Integer> publicKeyOfferTimeout = 
 				new SingleProfile<Integer>(new TimeoutConstrain(10000), 10000);
-		public final SingleProfile<Integer> publicKeyOfferReSends = 
-				new SingleProfile<Integer>(new ReSendsConstrain(10), 10);
+		public final SingleProfile<Integer> publicKeyOfferResends = 
+				new SingleProfile<Integer>(new ResendsConstrain(10), 10);
 		
 		public final SingleProfile<Integer> startSessionWaitTimeout = 
 				new SingleProfile<Integer>(new TimeoutConstrain(600000), 600000);
 		
 		public final SingleProfile<Integer> startSessionTimeout = 
 				new SingleProfile<Integer>(new TimeoutConstrain(10000), 10000);
-		public final SingleProfile<Integer> startSessionReSends = 
-				new SingleProfile<Integer>(new ReSendsConstrain(15), 15);
+		public final SingleProfile<Integer> startSessionResends = 
+				new SingleProfile<Integer>(new ResendsConstrain(15), 15);
 		
 		public final SingleProfile<Integer> connectionEstablishTimeout = 
 				new SingleProfile<Integer>(new TimeoutConstrain(10000), 10000);
-		public final SingleProfile<Integer> connectionEstablishReSends = 
-				new SingleProfile<Integer>(new ReSendsConstrain(5), 5);
+		public final SingleProfile<Integer> connectionEstablishResends = 
+				new SingleProfile<Integer>(new ResendsConstrain(5), 5);
 		
 		public final SingleProfile<Integer> connectionTimeout = 
 				new SingleProfile<Integer>(new TimeoutConstrain(20000), 20000);
 		public final SingleProfile<Integer> keepAliveDelay = 
 				new SingleProfile<Integer>(new TimeoutConstrain(5000), 5000);
 		
-		public final SingleProfile<Integer> preRequestReSends = 
-				new SingleProfile<Integer>(new ReSendsConstrain(20), 20);
+		public final SingleProfile<Integer> preRequestResends = 
+				new SingleProfile<Integer>(new ResendsConstrain(20), 20);
 		
 		private final static class TimeoutConstrain implements Constrain<Integer> {
 			
@@ -883,17 +1148,17 @@ public class SecureDelivery {
 			
 		}
 		
-		private final static class ReSendsConstrain implements Constrain<Integer> {
+		private final static class ResendsConstrain implements Constrain<Integer> {
 			
-			public final int defaultReSends;
+			public final int defaultResends;
 			
-			public ReSendsConstrain(int defaultReSends) {
-				this.defaultReSends = defaultReSends;
+			public ResendsConstrain(int defaultResends) {
+				this.defaultResends = defaultResends;
 			}
 
 			@Override
 			public Integer apply(Integer value) {
-				if(value == null) value = defaultReSends;
+				if(value == null) value = defaultResends;
 				if(value < 0) value = -1; // NOT RECOMMENDED: RESEND FOREVER 
 				return value;
 			}
@@ -938,7 +1203,7 @@ public class SecureDelivery {
 	
 	private static abstract class TimeoutTask implements Runnable {
 		
-		private boolean isCancelled;
+		boolean isCancelled;
 		
 		public final int timeoutLeft;
 		

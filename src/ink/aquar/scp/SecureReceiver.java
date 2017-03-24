@@ -64,7 +64,7 @@ public interface SecureReceiver {
 	 * When disconnect by another SecureDelivery disconnected or timeout.<br>
 	 * When that SecureDelivery denied your public key, it also send a disconnect message.<br>
 	 * <br>
-	 * Extra data will be null as disconnection by timeout.<br>
+	 * Extra data will be null when it is broken on way transmit.<br>
 	 * <br>
 	 * If you want to delay the confirmation, you have to keep up the wait status MANUALLY 
 	 * by SecureDelivery.publicKeyStandBy().<br>
