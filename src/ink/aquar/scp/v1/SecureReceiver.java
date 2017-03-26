@@ -53,7 +53,7 @@ public interface SecureReceiver {
 	 * <br>
 	 * @param publicKey The public key
 	 */
-	public boolean onPublicKeyRespond(byte[] publicKey);
+	public void onPublicKeyRespond(byte[] publicKey);
 	
 	/**
 	 * When the connection is established.
