@@ -1,4 +1,4 @@
-package ink.aquar.scp;
+package ink.aquar.scp.v1;
 
 /**
  * The interface that library user should implement in order to receive packets from SecureDelivery.<br>
@@ -17,14 +17,14 @@ public interface SecureReceiver {
 	 * @param tag The tag of data
 	 * @param data The content of the data.
 	 */
-	public void receive(int tag, byte[] data);
+	public void receive(long tag, byte[] data);
 	
 	/**
 	 * When a data is confirmed by target SecureDelivery.<br>
 	 * <br>
 	 * @param tag The tag of data
 	 */
-	public void postConfirm(int tag);
+	public void postConfirm(long tag);
 	
 	/**
 	 * When a data is broken on target SecureDelivery.<br>
@@ -32,7 +32,7 @@ public interface SecureReceiver {
 	 * <br>
 	 * @param tag The tag of data
 	 */
-	public void postBroken(int tag);
+	public void postBroken(long tag);
 	
 	/**
 	 * When another SecureDelivery try to connect to you.<br>

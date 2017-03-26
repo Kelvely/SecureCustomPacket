@@ -1,4 +1,4 @@
-package ink.aquar.scp;
+package ink.aquar.scp.v1;
 
 import java.security.InvalidKeyException;
 import java.util.HashMap;
@@ -9,6 +9,8 @@ import javax.crypto.BadPaddingException;
 
 import org.jacoco.core.internal.data.CRC64;
 
+import ink.aquar.scp.BasicMessenger;
+import ink.aquar.scp.BasicReceptor;
 import ink.aquar.scp.crypto.AESCrypto;
 import ink.aquar.scp.crypto.AsymmetricCrypto;
 import ink.aquar.scp.crypto.Crypto;
@@ -115,13 +117,13 @@ public class SecureDelivery {
 	 * 		|  connection confirm / send data	|
 	 * RCON	|<----------------------------------| Stage 6
 	 * 		|									|
-	 * 
-	 * TODO
 	 */
 	private int connectionStage;
 	
 	private TimeoutTask nextTimeout;
 	private TimeoutTask standByTimeout;
+	private TimeoutTask aliveKeeper;
+	private TimeoutTask connectionReaper;
 	
 	public final TimeoutProfile timeoutProfile = new TimeoutProfile(); // Complete.
 	
@@ -129,10 +131,11 @@ public class SecureDelivery {
 	
 	private int preRequestResends;
 	
+	private int preRequestReports;
+	
 	private byte[] encryptedSessionKey;
 	
 	private boolean isAcceptor; // Which means is bottom lol :D
-	// TODO On sending, and accepting. // Sending is done :)
 	
 	/*
 	 * You can implement a BukkitManagedScheduler :P while BukkitScheduler is already exists.
@@ -245,9 +248,12 @@ public class SecureDelivery {
 		});
 	}
 	
+	/**
+	 * The task that wait for acceptor offer public key
+	 */
 	private final class ConnectTimeoutTask extends TimeoutTask {
 		
-		private final byte[] datagram;
+		public final byte[] datagram;
 		
 		public ConnectTimeoutTask(int timeoutLeft, byte[] datagram) {
 			super(timeoutLeft);
@@ -308,6 +314,9 @@ public class SecureDelivery {
 		});
 	}
 	
+	/**
+	 * The task that wait for requester offer session key
+	 */
 	private final class PublicKeyTimeoutTask extends TimeoutTask {
 
 		public PublicKeyTimeoutTask(int timeoutLeft) {
@@ -374,6 +383,9 @@ public class SecureDelivery {
 		});
 	}
 	
+	/**
+	 * The task that wait for acceptor confirm session by double encrypt the key.
+	 */
 	private final class SessionStartTimeoutTask extends TimeoutTask {
 
 		public SessionStartTimeoutTask(int timeoutLeft) {
@@ -510,7 +522,7 @@ public class SecureDelivery {
 	}
 	
 	
-	private void broadcastReceive(int tag, byte[] data) {
+	private void broadcastReceive(long tag, byte[] data) {
 		synchronized (receivers) {
 			for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
 				byte[] clonedData = cloneBytes(data);
@@ -526,7 +538,7 @@ public class SecureDelivery {
 		}
 	}
 	
-	private void broadcastPostConfirm(int tag) {
+	private void broadcastPostConfirm(long tag) {
 		synchronized (receivers) {
 			for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
 				try {
@@ -541,7 +553,7 @@ public class SecureDelivery {
 		}
 	}
 	
-	private void broadcastPostBroken(int tag) {
+	private void broadcastPostBroken(long tag) {
 		synchronized (receivers) {
 			for(Entry<String, SecureReceiver> entry : receivers.entrySet()) {
 				try {
@@ -728,81 +740,347 @@ public class SecureDelivery {
 	// Requester side
 	private void handleConnectStandBy(Packet packet) {
 		if((!isStageConsistent(Stages.CONNECT_REQUEST_SENT)) || (packet.head.sessionId != sessionId)) return;
-		// TODO <<<<<<<<<<<<<<<<<<<<<<< HERE :D!
+		
+		nextTimeout.cancel();
+		
+		TimeoutTask timeoutTask = new ConnectTimeoutTask(nextTimeout.timeoutLeft, ((ConnectTimeoutTask) nextTimeout).datagram);
+		TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectRequestTimeout.get());
+		nextTimeout = timeoutTask;
 	}
 	
 	// Requester side
 	private void handlePublicKeyOffer(Packet packet) {
 		if((!isStageConsistent(Stages.CONNECT_REQUEST_SENT)) || (packet.head.sessionId != sessionId)) return;
-		// TODO
+		
+		byte[] publicKey;
+		try {
+			publicKey = LetterWrapper.resolve(packet.letter);
+			sessionKey = symCrypto.generateKey();
+			encryptedSessionKey = asymCrypto.encrypt(sessionKey, publicKey);
+		} catch (DataBrokenException ex) {
+			reportBrokenPreRequests();
+			return;
+		} catch (InvalidKeyException | BadPaddingException ex) {
+			windUp(BAD_PUBLIC_KEY);
+			return;
+		}
+		
+		clearBrokenPreRequests();
+		
+		standByTimeout.cancel();
+		nextTimeout.cancel();
+		
+		setStage(Stages.PUBLIC_KEY_OFFERED);
+		
+		broadcastOnPublicKeyRespond(publicKey);
 	}
 	
 	// Acceptor side
 	private void handlePublicKeyStandBy(Packet packet) {
 		if((!isStageConsistent(Stages.PUBLIC_KEY_OFFERED)) || (packet.head.sessionId != sessionId)) return;
-		// TODO
+		
+		nextTimeout.cancel();
+		
+		TimeoutTask timeoutTask = new PublicKeyTimeoutTask(nextTimeout.timeoutLeft);
+		TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.publicKeyOfferTimeout.get());
+		nextTimeout = timeoutTask;
 	}
 	
 	// Acceptor side
 	private void handleStartSession(Packet packet) {
 		if((!isStageConsistent(Stages.PUBLIC_KEY_OFFERED)) || (packet.head.sessionId != sessionId)) return;
-		// TODO
+		
+		try {
+			encryptedSessionKey = LetterWrapper.resolve(packet.letter);
+			sessionKey = asymCrypto.decrypt(encryptedSessionKey, privateKey);
+			encryptedSessionKey = symCrypto.encrypt(sessionKey, sessionKey);
+		} catch (DataBrokenException ex) {
+			reportBrokenPreRequests();
+			return;
+		} catch (InvalidKeyException | BadPaddingException ex) {
+			windUp(BAD_SESSION_KEY);
+			return;
+		}
+		
+		clearBrokenPreRequests();
+		
+		standByTimeout.cancel();
+		nextTimeout.cancel();
+		
+		setStage(Stages.SESSION_VERIFICATION_SENT);
+		
+		try {
+			sendConfirmSession(encryptedSessionKey);
+		} catch (InvalidKeyException | BadPaddingException ex) {
+			ex.printStackTrace();
+		}
+		
+		TimeoutTask timeoutTask = new ConfirmSessionTimeoutTask(0);
+		TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectionEstablishTimeout.get());
+		nextTimeout = timeoutTask;
+	}
+	
+	/**
+	 * The task that wait for requester to establish the connection
+	 */
+	private final class ConfirmSessionTimeoutTask extends TimeoutTask {
+
+		public ConfirmSessionTimeoutTask(int timeoutLeft) {
+			super(timeoutLeft);
+		}
+
+		@Override
+		public void run() {
+			scheduler.schedule(new Runnable() {
+				@Override
+				public void run() {
+					if(isCancelled) return;
+					if(timeoutLeft < timeoutProfile.connectionEstablishResends.get()) {
+						try {
+							sendConfirmSession(encryptedSessionKey);
+						} catch (InvalidKeyException | BadPaddingException ex) {
+							ex.printStackTrace();
+						}
+						TimeoutTask timeoutTask = new ConfirmSessionTimeoutTask(timeoutLeft + 1);
+						TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectionEstablishTimeout.get());
+						nextTimeout = timeoutTask;
+					} else {
+						windUp(TIMEOUT);
+					}
+				}
+			});
+		}
+		
 	}
 	
 	// Any side
 	private void handleBrokenPreRequest(Packet packet) {
 		if(packet.head.tag == Stages.NOT_CONNECTED && isStageConsistent(Stages.CONNECT_REQUEST_SENT)) {
-			// TODO Re-send the connect request.
-		} else if(packet.head.sessionId != sessionId) {
-			return;
-		} else if(isStageConsistent((int) packet.head.tag + 1)){
-			// TODO Re-send the request.
+			if(isAcceptor) return;
+			
+			ConnectTimeoutTask connectTimeoutTask = (ConnectTimeoutTask) nextTimeout;
+			sendConnect(connectTimeoutTask.datagram);
+			
+			connectTimeoutTask.cancel();
+			TimeoutTask timeoutTask = new ConnectTimeoutTask(connectTimeoutTask.timeoutLeft, connectTimeoutTask.datagram);
+			TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectRequestTimeout.get());
+			nextTimeout = timeoutTask;
+		} else if(packet.head.sessionId == sessionId && isStageConsistent((int) packet.head.tag + 1)){
+			if(preRequestResends++ < timeoutProfile.brokenPreRequestResends.get()) {
+				nextTimeout.cancel();
+				switch ((int) packet.head.tag) {
+				case Stages.CONNECT_REQUEST_SENT: {
+						// TODO send public key again
+					} break;
+
+				case Stages.PUBLIC_KEY_OFFERED: {
+						// TODO send session key again
+					} break;
+					
+				case Stages.SESSION_KEY_SENT: {
+						// TODO send session confirm again
+					} break;
+					
+				case Stages.SESSION_VERIFICATION_SENT: {
+						// TODO send connection establishment again
+					} break;
+					
+				case Stages.CONNECTION_ESTABLISHING: {
+						// TODO send connection confirm again
+					} break;
+				}
+				
+				// Woo~ woo~ and see you again~ :D
+			} else {
+				windUp(BAD_PACKET);
+			}
 		}
 	}
 	
 	// Requester side
+	// Establish connection
 	private void handleConfirmSession(Packet packet) {
 		if((!isStageConsistent(Stages.SESSION_KEY_SENT)) || (packet.head.sessionId != sessionId)) return;
-		// TODO
+		
+		try{
+			byte[] encryptedSessionKey = LetterWrapper.resolve(packet.letter);
+			byte[] reportSessionKey = symCrypto.decrypt(encryptedSessionKey, sessionKey);
+			if(!byteArrayEquals(sessionKey, reportSessionKey)) {
+				windUp(BAD_SESSION_KEY);
+				return;
+			}
+		} catch (DataBrokenException ex) {
+			reportBrokenPreRequests();
+			return;
+		} catch (InvalidKeyException | BadPaddingException ex) {
+			windUp(BAD_SESSION_KEY);
+			return;
+		}
+		
+		clearBrokenPreRequests();
+		
+		nextTimeout.cancel();
+		
+		setStage(Stages.CONNECTION_ESTABLISHING);
+		
+		sendConnectionEstablish();
+		
+		TimeoutTask timeoutTask = new ConnectionEstablishTimeoutTask(0);
+		TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectionConfirmTimeout.get());
+		nextTimeout = timeoutTask;
+	}
+	
+	/**
+	 * The task that wait for acceptor to confirm the connection
+	 */
+	private final class ConnectionEstablishTimeoutTask extends TimeoutTask {
+
+		public ConnectionEstablishTimeoutTask(int timeoutLeft) {
+			super(timeoutLeft);
+		}
+
+		@Override
+		public void run() {
+			scheduler.schedule(new Runnable() {
+				@Override
+				public void run() {
+					if(isCancelled) return;
+					if(timeoutLeft < timeoutProfile.connectionConfirmResends.get()) {
+						sendConnectionEstablish();
+						TimeoutTask timeoutTask = new ConnectionEstablishTimeoutTask(timeoutLeft + 1);
+						TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectionConfirmTimeout.get());
+						nextTimeout = timeoutTask;
+					} else {
+						windUp(TIMEOUT);
+					}
+				}
+			});
+		}
+		
 	}
 	
 	// Acceptor side
+	// Confirm connection
+	// Notify receivers that connection is established
 	private void handleConnectionEstablish(Packet packet) {
-		if((!isStageConsistent(Stages.SESSION_VERIFICATION_SENT)) || (packet.head.sessionId != sessionId)) return;
-		// TODO
+		if((!(isStageConsistent(Stages.SESSION_VERIFICATION_SENT) || 
+				isStageConsistent(Stages.CONNECTED))) || (packet.head.sessionId != sessionId)) return;
+		
+		nextTimeout.cancel();
+		
+		setStage(Stages.CONNECTED);
+		
+		sendConectionConfirm();
+		
+		broadcastOnConnectionEstablish();
 	}
 	
 	// Requester side
+	// Notify receivers that connection is established
 	private void handleConnectionConfirm(Packet packet) {
 		if((!isStageConsistent(Stages.CONNECTION_ESTABLISHING)) || (packet.head.sessionId != sessionId)) return;
-		// TODO Establish the connection
+		
+		confirmConnection();
+		
+		alive();
 	}
 	
 	// Any side, special for requester side as connection confirm
+	// (Notify receivers that connection is established if they didn't know)
 	private void handleSendData(Packet packet) {
 		if(packet.head.sessionId != sessionId) return;
 		if(isStageConsistent(Stages.CONNECTION_ESTABLISHING)) {
-			// TODO Establish the connection
+			confirmConnection();
 		} else if (!isStageConsistent(Stages.CONNECTED)) return;
-		// TODO
+		
+		long tag = packet.head.tag;
+		
+		byte[] data;
+		try {
+			data = LetterWrapper.decryptAndResolve(packet.letter, symCrypto, sessionKey);
+		} catch (InvalidKeyException | BadPaddingException | DataBrokenException e) {
+			sendDataBroken(tag);
+			alive();
+			return;
+		}
+		
+		sendDataConfirm(tag);
+		
+		alive();
+		
+		broadcastReceive(tag, data);
 	}
 	
 	// Any side
 	private void handleConfirmData(Packet packet) {
 		if((!isStageConsistent(Stages.CONNECTED)) || (packet.head.sessionId != sessionId)) return;
-		// TODO
+		
+		alive();
+		
+		broadcastPostConfirm(packet.head.tag);
 	}
 	
 	// Any side
 	private void handleBrokenData(Packet packet) {
 		if((!isStageConsistent(Stages.CONNECTED)) || (packet.head.sessionId != sessionId)) return;
-		// TODO
+		
+		alive();
+		
+		broadcastPostBroken(packet.head.tag);
 	}
 	
 	// Any side
 	private void handleKeepAlive(Packet packet) {
-		if((!isStageConsistent(Stages.CONNECTED)) || (packet.head.sessionId != sessionId)) return;
-		// TODO
+		if(packet.head.sessionId != sessionId) return;
+		if(isStageConsistent(Stages.CONNECTION_ESTABLISHING)) {
+			confirmConnection();
+		} else if(!isStageConsistent(Stages.CONNECTED)) return;
+		alive();
+	}
+	
+	private void confirmConnection() {
+		clearBrokenPreRequests();
+		nextTimeout.cancel();
+		setStage(Stages.CONNECTED);
+		aliveKeeper = new KeepAliveTask();
+		TICK_SCHEDULER.schedule(aliveKeeper);
+		broadcastOnConnectionEstablish();
+	}
+	
+	private final class KeepAliveTask extends TimeoutTask {
+
+		public KeepAliveTask() {
+			super(0);
+		}
+
+		@Override
+		public void run() {
+			scheduler.schedule(new Runnable() {
+				@Override
+				public void run() {
+					if(isCancelled) return;
+					sendKeepAlive();
+					TICK_SCHEDULER.schedule(this, timeoutProfile.keepAliveDelay.get());
+				}
+			});
+		}
+		
+	}
+	
+	private void alive() {
+		if(connectionReaper != null) {
+			connectionReaper.cancel();
+		}
+		connectionReaper = new WindUpTask();
+		TICK_SCHEDULER.schedule(connectionReaper, timeoutProfile.connectionTimeout.get());
+	}
+	
+	private static boolean byteArrayEquals(byte[] a, byte[] b) {
+		if(a.length != b.length) return false;
+		for(int i=0;i<a.length;i++) {
+			if(a[i] != b[i]) return false;
+		}
+		return true;
 	}
 	
 	
@@ -898,6 +1176,15 @@ public class SecureDelivery {
 			standByTimeout.cancel();
 			standByTimeout = null;
 		}
+		if(aliveKeeper != null) {
+			aliveKeeper.cancel();
+			aliveKeeper = null;
+		}
+		if(connectionReaper != null) {
+			connectionReaper.cancel();
+			connectionReaper = null;
+		}
+		clearBrokenPreRequests();
 		broadcastOnDisconnect(datagram);
 	}
 	
@@ -909,20 +1196,14 @@ public class SecureDelivery {
 				
 				@Override
 				public void run() {
-					
 					try {
 						Packet packet = Packet.resolve(data);
-						preRequestResends = 0;
 						handle(packet);
 					} catch (DataBrokenException ex) {
 						if(!isStageConsistent(Stages.CONNECTED)) {
-							if(connectionStage == Stages.NOT_CONNECTED) {
+							if(isStageConsistent(Stages.NOT_CONNECTED)) {
 								sendBrokenPreRequest(connectionStage);
-							} else if (preRequestResends++ < timeoutProfile.preRequestResends.get()) {
-								sendBrokenPreRequest(connectionStage);
-							} else {
-								windUp(BAD_PACKET);
-							}
+							} else reportBrokenPreRequests();
 						}
 					}
 				}
@@ -930,6 +1211,18 @@ public class SecureDelivery {
 			});
 		}
 		
+	}
+	
+	private void reportBrokenPreRequests() {
+		if (preRequestReports++ < timeoutProfile.brokenPreRequestReports.get()) {
+			sendBrokenPreRequest(connectionStage);
+		} else {
+			windUp(BAD_PACKET);
+		}
+	}
+	
+	private void clearBrokenPreRequests() {
+		preRequestReports = 0;
 	}
 	
 	
@@ -1122,13 +1415,21 @@ public class SecureDelivery {
 		public final SingleProfile<Integer> connectionEstablishResends = 
 				new SingleProfile<Integer>(new ResendsConstrain(5), 5);
 		
+		public final SingleProfile<Integer> connectionConfirmTimeout = 
+				new SingleProfile<Integer>(new TimeoutConstrain(10000), 10000);
+		public final SingleProfile<Integer> connectionConfirmResends = 
+				new SingleProfile<Integer>(new ResendsConstrain(5), 5);
+		
 		public final SingleProfile<Integer> connectionTimeout = 
 				new SingleProfile<Integer>(new TimeoutConstrain(20000), 20000);
 		public final SingleProfile<Integer> keepAliveDelay = 
 				new SingleProfile<Integer>(new TimeoutConstrain(5000), 5000);
 		
-		public final SingleProfile<Integer> preRequestResends = 
+		public final SingleProfile<Integer> brokenPreRequestReports = 
 				new SingleProfile<Integer>(new ResendsConstrain(20), 20);
+		
+		public final SingleProfile<Integer> brokenPreRequestResends = 
+				new SingleProfile<Integer>(new ResendsConstrain(100), 100);
 		
 		private final static class TimeoutConstrain implements Constrain<Integer> {
 			
