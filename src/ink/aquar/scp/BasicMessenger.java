@@ -4,6 +4,10 @@ package ink.aquar.scp;
  * A communicator for library user to implement, you can connect it to Socket, Bukkit PluginMessage, etc.<br>
  * You also need to implement BasicReceptor to receive messages.<br>
  * 
+ * You can try some erasure codings to avoid data damage!<br>
+ * <h1>Reed Solomon Erasure Coding is recommended: </h1><link>https://github.com/Backblaze/JavaReedSolomon</link><br>
+ * <br>
+ * 
  * @see BasicReceptor
  * 
  * @author Aquarink Studio

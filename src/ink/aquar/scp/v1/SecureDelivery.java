@@ -870,23 +870,43 @@ public class SecureDelivery {
 				nextTimeout.cancel();
 				switch ((int) packet.head.tag) {
 				case Stages.CONNECT_REQUEST_SENT: {
-						// TODO send public key again
+						sendPublicKeyOffer(publicKey);
+						nextTimeout.cancel();
+						TimeoutTask timeoutTask = new PublicKeyTimeoutTask(nextTimeout.timeoutLeft);
+						TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.publicKeyOfferTimeout.get());
+						nextTimeout = timeoutTask;
 					} break;
 
 				case Stages.PUBLIC_KEY_OFFERED: {
-						// TODO send session key again
+						sendStartSession(encryptedSessionKey);
+						nextTimeout.cancel();
+						TimeoutTask timeoutTask = new SessionStartTimeoutTask(nextTimeout.timeoutLeft);
+						TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.startSessionTimeout.get());
+						nextTimeout = timeoutTask;
 					} break;
 					
 				case Stages.SESSION_KEY_SENT: {
-						// TODO send session confirm again
+						try {
+							sendConfirmSession(encryptedSessionKey);
+						} catch (InvalidKeyException | BadPaddingException ex) {
+							ex.printStackTrace();
+						}
+						nextTimeout.cancel();
+						TimeoutTask timeoutTask = new ConfirmSessionTimeoutTask(nextTimeout.timeoutLeft);
+						TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectionEstablishTimeout.get());
+						nextTimeout = timeoutTask;
 					} break;
 					
 				case Stages.SESSION_VERIFICATION_SENT: {
-						// TODO send connection establishment again
+						sendConnectionEstablish();
+						nextTimeout.cancel();
+						TimeoutTask timeoutTask = new ConnectionEstablishTimeoutTask(nextTimeout.timeoutLeft);
+						TICK_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectionConfirmTimeout.get());
+						nextTimeout = timeoutTask;
 					} break;
 					
 				case Stages.CONNECTION_ESTABLISHING: {
-						// TODO send connection confirm again
+						sendConnectionEstablish();
 					} break;
 				}
 				
@@ -963,8 +983,10 @@ public class SecureDelivery {
 	// Confirm connection
 	// Notify receivers that connection is established
 	private void handleConnectionEstablish(Packet packet) {
-		if((!(isStageConsistent(Stages.SESSION_VERIFICATION_SENT) || 
-				isStageConsistent(Stages.CONNECTED))) || (packet.head.sessionId != sessionId)) return;
+		if(packet.head.sessionId != sessionId) return;
+		if(isStageConsistent(Stages.CONNECTED)) {
+			sendConectionConfirm();
+		} else if(!isStageConsistent(Stages.SESSION_VERIFICATION_SENT)) return;
 		
 		nextTimeout.cancel();
 		
@@ -1184,6 +1206,7 @@ public class SecureDelivery {
 			connectionReaper.cancel();
 			connectionReaper = null;
 		}
+		preRequestResends = 0;
 		clearBrokenPreRequests();
 		broadcastOnDisconnect(datagram);
 	}
