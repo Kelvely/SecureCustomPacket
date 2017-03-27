@@ -19,6 +19,8 @@ import ink.aquar.scp.crypto.SymmetricCrypto;
 import ink.aquar.scp.crypto.AsymmetricCrypto.ByteKeyPair;
 import ink.aquar.scp.util.ByteWrapper;
 import ink.aquar.scp.util.ByteWrapper.OutputType;
+import ink.aquar.scp.util.DelayableScheduler;
+import ink.aquar.scp.util.DelayableSchedulerWrapper;
 import ink.aquar.scp.util.QueueScheduler;
 import ink.aquar.scp.util.Scheduler;
 import ink.aquar.scp.util.SchedulerWrapper;
@@ -68,7 +70,7 @@ public class SecureDelivery {
 	
 	private final static Random RANDOM = new Random();
 	
-	private final static TickingScheduler.Wrapper TICK_SCHEDULER = new TickingScheduler.Wrapper(new TickingScheduler());
+	private final static DelayableSchedulerWrapper TICK_SCHEDULER = new DelayableSchedulerWrapper(new TickingScheduler());
 	
 	private final static byte[] BAD_PACKET = "BAD_PACKET".getBytes();
 	private final static byte[] BAD_PUBLIC_KEY = "BAD_PUBLIC_KEY".getBytes();
@@ -1146,7 +1148,7 @@ public class SecureDelivery {
 	}
 	
 	private void sendConfirmSession(byte[] sessionKey) throws InvalidKeyException, BadPaddingException {
-		byte[] letter = LetterWrapper.wrapAndEncrypt(sessionKey, symCrypto, sessionKey);
+		byte[] letter = LetterWrapper.wrap(sessionKey);
 		Packet packet = new Packet(sessionId, Operations.CONFIRM_SESSION, 0, letter);
 		basicMessenger.send(packet.wrap());
 	}
