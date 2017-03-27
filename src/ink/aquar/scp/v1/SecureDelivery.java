@@ -68,8 +68,6 @@ public class SecureDelivery {
 	
 	private final static Random RANDOM = new Random();
 	
-	private final static DelayableScheduler DELAYABLE_SCHEDULER = new TimingScheduler();
-	
 	private final static byte[] BAD_PACKET = "BAD_PACKET".getBytes();
 	private final static byte[] BAD_PUBLIC_KEY = "BAD_PUBLIC_KEY".getBytes();
 	private final static byte[] BAD_SESSION_KEY = "BAD_SESSION_KEY".getBytes();
@@ -141,6 +139,8 @@ public class SecureDelivery {
 	 * You can implement a BukkitManagedScheduler :P while BukkitScheduler is already exists.
 	 */
 	private final Scheduler scheduler; 
+	
+	private final DelayableScheduler delayableScheduler = new TimingScheduler();
 	
 	/**
 	 * Construct a SecureDelivery by default public key and private key, which are auto generated, 
@@ -237,11 +237,11 @@ public class SecureDelivery {
 				sendConnect(datagram);
 				
 				TimeoutTask standByTask = new WindUpTask();
-				DELAYABLE_SCHEDULER.schedule(standByTask, timeoutProfile.publicKeyOfferWaitTimeout.get());
+				delayableScheduler.schedule(standByTask, timeoutProfile.publicKeyOfferWaitTimeout.get());
 				standByTimeout = standByTask;
 				
 				TimeoutTask timeoutTask = new ConnectTimeoutTask(0, datagram);
-				DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectRequestTimeout.get());
+				delayableScheduler.schedule(timeoutTask, timeoutProfile.connectRequestTimeout.get());
 				nextTimeout = timeoutTask;
 			}
 			
@@ -269,7 +269,7 @@ public class SecureDelivery {
 					if(timeoutLeft < timeoutProfile.connectRequestResends.get()) {
 						sendConnect(datagram);
 						TimeoutTask timeoutTask = new ConnectTimeoutTask(timeoutLeft + 1, datagram);
-						DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectRequestTimeout.get());
+						delayableScheduler.schedule(timeoutTask, timeoutProfile.connectRequestTimeout.get());
 						nextTimeout = timeoutTask;
 					} else {
 						windUp(TIMEOUT);
@@ -300,11 +300,11 @@ public class SecureDelivery {
 					sendPublicKeyOffer(publicKey);
 					
 					TimeoutTask standByTask = new WindUpTask();
-					DELAYABLE_SCHEDULER.schedule(standByTask, timeoutProfile.startSessionWaitTimeout.get());
+					delayableScheduler.schedule(standByTask, timeoutProfile.startSessionWaitTimeout.get());
 					standByTimeout = standByTask;
 					
 					TimeoutTask timeoutTask = new PublicKeyTimeoutTask(0);
-					DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.publicKeyOfferTimeout.get());
+					delayableScheduler.schedule(timeoutTask, timeoutProfile.publicKeyOfferTimeout.get());
 					nextTimeout = timeoutTask;
 				} else {
 					windUp(CONNECT_REJECT);
@@ -332,7 +332,7 @@ public class SecureDelivery {
 					if(timeoutLeft < timeoutProfile.publicKeyOfferResends.get()) {
 						sendPublicKeyOffer(publicKey);
 						TimeoutTask timeoutTask = new PublicKeyTimeoutTask(timeoutLeft + 1);
-						DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.publicKeyOfferTimeout.get());
+						delayableScheduler.schedule(timeoutTask, timeoutProfile.publicKeyOfferTimeout.get());
 						nextTimeout = timeoutTask;
 					} else {
 						windUp(TIMEOUT);
@@ -373,7 +373,7 @@ public class SecureDelivery {
 					sendStartSession(encryptedSessionKey);
 					
 					TimeoutTask timeoutTask = new SessionStartTimeoutTask(0);
-					DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.startSessionTimeout.get());
+					delayableScheduler.schedule(timeoutTask, timeoutProfile.startSessionTimeout.get());
 					nextTimeout = timeoutTask;
 				} else {
 					windUp(CONNECT_REJECT);
@@ -402,7 +402,7 @@ public class SecureDelivery {
 						sendStartSession(encryptedSessionKey);
 						
 						TimeoutTask timeoutTask = new SessionStartTimeoutTask(timeoutLeft + 1);
-						DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.startSessionTimeout.get());
+						delayableScheduler.schedule(timeoutTask, timeoutProfile.startSessionTimeout.get());
 						nextTimeout = timeoutTask;
 					} else {
 						windUp(TIMEOUT);
@@ -744,7 +744,7 @@ public class SecureDelivery {
 		nextTimeout.cancel();
 		
 		TimeoutTask timeoutTask = new ConnectTimeoutTask(nextTimeout.timeoutLeft, ((ConnectTimeoutTask) nextTimeout).datagram);
-		DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectRequestTimeout.get());
+		delayableScheduler.schedule(timeoutTask, timeoutProfile.connectRequestTimeout.get());
 		nextTimeout = timeoutTask;
 	}
 	
@@ -782,7 +782,7 @@ public class SecureDelivery {
 		nextTimeout.cancel();
 		
 		TimeoutTask timeoutTask = new PublicKeyTimeoutTask(nextTimeout.timeoutLeft);
-		DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.publicKeyOfferTimeout.get());
+		delayableScheduler.schedule(timeoutTask, timeoutProfile.publicKeyOfferTimeout.get());
 		nextTimeout = timeoutTask;
 	}
 	
@@ -816,7 +816,7 @@ public class SecureDelivery {
 		}
 		
 		TimeoutTask timeoutTask = new ConfirmSessionTimeoutTask(0);
-		DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectionEstablishTimeout.get());
+		delayableScheduler.schedule(timeoutTask, timeoutProfile.connectionEstablishTimeout.get());
 		nextTimeout = timeoutTask;
 	}
 	
@@ -842,7 +842,7 @@ public class SecureDelivery {
 							ex.printStackTrace();
 						}
 						TimeoutTask timeoutTask = new ConfirmSessionTimeoutTask(timeoutLeft + 1);
-						DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectionEstablishTimeout.get());
+						delayableScheduler.schedule(timeoutTask, timeoutProfile.connectionEstablishTimeout.get());
 						nextTimeout = timeoutTask;
 					} else {
 						windUp(TIMEOUT);
@@ -863,7 +863,7 @@ public class SecureDelivery {
 			
 			connectTimeoutTask.cancel();
 			TimeoutTask timeoutTask = new ConnectTimeoutTask(connectTimeoutTask.timeoutLeft, connectTimeoutTask.datagram);
-			DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectRequestTimeout.get());
+			delayableScheduler.schedule(timeoutTask, timeoutProfile.connectRequestTimeout.get());
 			nextTimeout = timeoutTask;
 		} else if(packet.head.sessionId == sessionId && isStageConsistent((int) packet.head.tag + 1)){
 			if(preRequestResends++ < timeoutProfile.brokenPreRequestResends.get()) {
@@ -873,7 +873,7 @@ public class SecureDelivery {
 						sendPublicKeyOffer(publicKey);
 						nextTimeout.cancel();
 						TimeoutTask timeoutTask = new PublicKeyTimeoutTask(nextTimeout.timeoutLeft);
-						DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.publicKeyOfferTimeout.get());
+						delayableScheduler.schedule(timeoutTask, timeoutProfile.publicKeyOfferTimeout.get());
 						nextTimeout = timeoutTask;
 					} break;
 
@@ -881,7 +881,7 @@ public class SecureDelivery {
 						sendStartSession(encryptedSessionKey);
 						nextTimeout.cancel();
 						TimeoutTask timeoutTask = new SessionStartTimeoutTask(nextTimeout.timeoutLeft);
-						DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.startSessionTimeout.get());
+						delayableScheduler.schedule(timeoutTask, timeoutProfile.startSessionTimeout.get());
 						nextTimeout = timeoutTask;
 					} break;
 					
@@ -893,7 +893,7 @@ public class SecureDelivery {
 						}
 						nextTimeout.cancel();
 						TimeoutTask timeoutTask = new ConfirmSessionTimeoutTask(nextTimeout.timeoutLeft);
-						DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectionEstablishTimeout.get());
+						delayableScheduler.schedule(timeoutTask, timeoutProfile.connectionEstablishTimeout.get());
 						nextTimeout = timeoutTask;
 					} break;
 					
@@ -901,7 +901,7 @@ public class SecureDelivery {
 						sendConnectionEstablish();
 						nextTimeout.cancel();
 						TimeoutTask timeoutTask = new ConnectionEstablishTimeoutTask(nextTimeout.timeoutLeft);
-						DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectionConfirmTimeout.get());
+						delayableScheduler.schedule(timeoutTask, timeoutProfile.connectionConfirmTimeout.get());
 						nextTimeout = timeoutTask;
 					} break;
 					
@@ -946,7 +946,7 @@ public class SecureDelivery {
 		sendConnectionEstablish();
 		
 		TimeoutTask timeoutTask = new ConnectionEstablishTimeoutTask(0);
-		DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectionConfirmTimeout.get());
+		delayableScheduler.schedule(timeoutTask, timeoutProfile.connectionConfirmTimeout.get());
 		nextTimeout = timeoutTask;
 	}
 	
@@ -968,7 +968,7 @@ public class SecureDelivery {
 					if(timeoutLeft < timeoutProfile.connectionConfirmResends.get()) {
 						sendConnectionEstablish();
 						TimeoutTask timeoutTask = new ConnectionEstablishTimeoutTask(timeoutLeft + 1);
-						DELAYABLE_SCHEDULER.schedule(timeoutTask, timeoutProfile.connectionConfirmTimeout.get());
+						delayableScheduler.schedule(timeoutTask, timeoutProfile.connectionConfirmTimeout.get());
 						nextTimeout = timeoutTask;
 					} else {
 						windUp(TIMEOUT);
@@ -1065,7 +1065,7 @@ public class SecureDelivery {
 		nextTimeout.cancel();
 		setStage(Stages.CONNECTED);
 		aliveKeeper = new KeepAliveTask();
-		DELAYABLE_SCHEDULER.schedule(aliveKeeper);
+		delayableScheduler.schedule(aliveKeeper);
 		broadcastOnConnectionEstablish();
 	}
 	
@@ -1082,7 +1082,7 @@ public class SecureDelivery {
 				public void run() {
 					if(isCancelled) return;
 					sendKeepAlive();
-					DELAYABLE_SCHEDULER.schedule(this, timeoutProfile.keepAliveDelay.get());
+					delayableScheduler.schedule(this, timeoutProfile.keepAliveDelay.get());
 				}
 			});
 		}
@@ -1094,7 +1094,7 @@ public class SecureDelivery {
 			connectionReaper.cancel();
 		}
 		connectionReaper = new WindUpTask();
-		DELAYABLE_SCHEDULER.schedule(connectionReaper, timeoutProfile.connectionTimeout.get());
+		delayableScheduler.schedule(connectionReaper, timeoutProfile.connectionTimeout.get());
 	}
 	
 	private static boolean byteArrayEquals(byte[] a, byte[] b) {
@@ -1208,6 +1208,7 @@ public class SecureDelivery {
 		}
 		preRequestResends = 0;
 		clearBrokenPreRequests();
+		delayableScheduler.clear();
 		broadcastOnDisconnect(datagram);
 	}
 	
