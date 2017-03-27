@@ -1195,8 +1195,8 @@ public class SecureDelivery {
 			standByTimeout = null;
 		}
 		if(nextTimeout != null) {
-			standByTimeout.cancel();
-			standByTimeout = null;
+			nextTimeout.cancel();
+			nextTimeout = null;
 		}
 		if(aliveKeeper != null) {
 			aliveKeeper.cancel();
