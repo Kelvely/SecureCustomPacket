@@ -29,11 +29,20 @@ public class QueueScheduler implements Scheduler {
 	private final Lock runningLock = new ReentrantLock();
 	private boolean isRunning;
 	
+	/**
+	 * Create a QueueScheduler with a task submission timeout.<br>
+	 *
+	 * @param submitTimeout Task submission timeout
+	 * @param submitTimeUnit Time unit of task submission timeout
+	 */
 	public QueueScheduler(long submitTimeout, TimeUnit submitTimeUnit) {
 		this.submitTimeout = submitTimeout;
 		this.submitTimeUnit = submitTimeUnit;
 	}
 	
+	/**
+	 * Create a QueueScheduler with default task submission timeout 1 second.<br>
+	 */
 	public QueueScheduler() {
 		this(DEFAULT_TIMEOUT, DEFAULT_TIME_UNIT);
 	}

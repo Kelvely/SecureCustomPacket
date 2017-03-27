@@ -5,11 +5,22 @@ import java.util.TimerTask;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * An implementation of DelayableScheduler.<br>
+ * <br>
+ * An application of Java Timer.<br>
+ * 
+ * @see DelayableScheduler
+ * 
+ * @author Aquarink Studio
+ * @author Kevin Iry
+ *
+ */
 public class TimingScheduler implements DelayableScheduler {
 	
 	private final Timer timer = new Timer();
 	
-	private WrapperedBoolean currentSignal;
+	private WrapperedBoolean currentSignal = new WrapperedBoolean();
 	private final Lock signalLock = new ReentrantLock();
 
 	@Override
