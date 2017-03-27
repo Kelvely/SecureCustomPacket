@@ -37,7 +37,7 @@ public class DelayableSchedulerWrapper extends SchedulerWrapper {
 	 * @param task The task
 	 * @param delay Delay in millisecond
 	 */
-	public void schedule(Runnable task, int delay) {
+	public void schedule(Runnable task, long delay) {
 		synchronized (scheduler) {
 			if(!scheduler.isRunning()) {
 				scheduler.start();

@@ -8,11 +8,14 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * An implementation of Scheduler, creating a new Thread to sync the tasks.<br>
  * You can add delayed tasks into TickingScheduler.<br>
+ * <br>
+ * Deprecated because of deadlock bugs.<br>
  * 
  * @see Scheduler
  * 
  * @author Aquarink Studio
  * @author Kevin Iry
+ * @deprecated
  */
 public class TickingScheduler implements DelayableScheduler {
 	
@@ -110,10 +113,10 @@ public class TickingScheduler implements DelayableScheduler {
 	}
 	
 	@Override
-	public void schedule(Runnable task, int delay) {
+	public void schedule(Runnable task, long delay) {
 		if(delay<0) delay = 0;
 		synchronized (agenda) {
-			int time = this.time + delay / tickInterval;
+			int time = this.time + (int) delay / tickInterval;
 			List<Runnable> list = agenda.get(time);
 			if(list == null) {
 				list = new LinkedList<>();

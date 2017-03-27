@@ -19,12 +19,11 @@ import ink.aquar.scp.crypto.SymmetricCrypto;
 import ink.aquar.scp.crypto.AsymmetricCrypto.ByteKeyPair;
 import ink.aquar.scp.util.ByteWrapper;
 import ink.aquar.scp.util.ByteWrapper.OutputType;
-import ink.aquar.scp.util.DelayableScheduler;
 import ink.aquar.scp.util.DelayableSchedulerWrapper;
 import ink.aquar.scp.util.QueueScheduler;
 import ink.aquar.scp.util.Scheduler;
 import ink.aquar.scp.util.SchedulerWrapper;
-import ink.aquar.scp.util.TickingScheduler;
+import ink.aquar.scp.util.TimingScheduler;
 
 /**
  * SecureDeliver provides secure connection between two terminals. It provides data validity verification, 
@@ -70,7 +69,7 @@ public class SecureDelivery {
 	
 	private final static Random RANDOM = new Random();
 	
-	private final static DelayableSchedulerWrapper TICK_SCHEDULER = new DelayableSchedulerWrapper(new TickingScheduler());
+	private final static DelayableSchedulerWrapper TICK_SCHEDULER = new DelayableSchedulerWrapper(new TimingScheduler());
 	
 	private final static byte[] BAD_PACKET = "BAD_PACKET".getBytes();
 	private final static byte[] BAD_PUBLIC_KEY = "BAD_PUBLIC_KEY".getBytes();

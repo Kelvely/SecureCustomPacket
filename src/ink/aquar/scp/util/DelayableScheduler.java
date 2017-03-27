@@ -17,6 +17,6 @@ public interface DelayableScheduler extends Scheduler {
 	 * @param task The task
 	 * @param delay Delay in millisecond
 	 */
-	public void schedule(Runnable task, int delayInMillisec);
+	public void schedule(Runnable task, long delayInMillisec);
 
 }
